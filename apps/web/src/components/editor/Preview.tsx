@@ -74,6 +74,9 @@ import { ProcessingOverlay } from "./ProcessingOverlay";
 import { toast } from "../../stores/notification-store";
 import type { MotionPathConfig, GSAPMotionPathPoint } from "@openreel/core";
 
+/** Preset zoom levels for the stage zoom dropdown (in fraction, 1 = 100%). */
+const STAGE_ZOOM_PRESETS = [0.25, 0.5, 1, 1.5, 2] as const;
+
 const getAdaptivePoolSize = (width: number, height: number): number => {
   const pixels = width * height;
   if (pixels >= 3840 * 2160) return 6;
@@ -4773,7 +4776,10 @@ export const Preview: React.FC = () => {
           const result = await importMedia(file);
           if (result.success && result.actionId) {
             const mediaId = result.actionId;
-            // Snapshot existing clips before adding the new one
+            // Snapshot existing clips before adding the new one.
+            // Using getState() directly (outside React renders) is intentional here —
+            // we need a synchronous snapshot immediately before the async addClipToNewTrack call
+            // so we can identify the newly created clip by diffing clip IDs.
             const prevClipIds = new Set(
               useProjectStore.getState().project.timeline.tracks
                 .flatMap((t) => t.clips)
@@ -5017,6 +5023,8 @@ export const Preview: React.FC = () => {
                   width: "100%",
                   height: "100%",
                   maxWidth: "none",
+                  // Divide pan by zoom so the visual pan distance stays constant
+                  // regardless of the current zoom level (CSS scale coordinate system).
                   transform: `scale(${stageZoom}) translate(${stagePan.x / stageZoom}px, ${stagePan.y / stageZoom}px)`,
                   transformOrigin: "center center",
                 }
@@ -5024,6 +5032,8 @@ export const Preview: React.FC = () => {
                   height: `${450 * zoomLevel}px`,
                   width: `calc(${450 * zoomLevel}px * ${settings.width} / ${settings.height})`,
                   maxWidth: `${800 * zoomLevel}px`,
+                  // Divide pan by zoom so the visual pan distance stays constant
+                  // regardless of the current zoom level (CSS scale coordinate system).
                   transform: `scale(${stageZoom}) translate(${stagePan.x / stageZoom}px, ${stagePan.y / stageZoom}px)`,
                   transformOrigin: "center center",
                 }
@@ -5515,23 +5525,26 @@ export const Preview: React.FC = () => {
                   onClick={() => setShowZoomMenu(false)}
                 />
                 <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-background-elevated border border-border rounded-lg shadow-xl py-1 z-50 min-w-[80px]">
-                  {[
-                    { label: "Fit", action: handleFitToView },
-                    { label: "25%", action: () => { setStageZoom(0.25); } },
-                    { label: "50%", action: () => { setStageZoom(0.5); } },
-                    { label: "100%", action: () => { setStageZoom(1); } },
-                    { label: "150%", action: () => { setStageZoom(1.5); } },
-                    { label: "200%", action: () => { setStageZoom(2); } },
-                  ].map((opt) => (
+                  <button
+                    key="fit"
+                    onClick={() => {
+                      handleFitToView();
+                      setShowZoomMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-mono text-left hover:bg-background-secondary transition-colors text-text-secondary"
+                  >
+                    Fit
+                  </button>
+                  {STAGE_ZOOM_PRESETS.map((level) => (
                     <button
-                      key={opt.label}
+                      key={level}
                       onClick={() => {
-                        opt.action();
+                        setStageZoom(level);
                         setShowZoomMenu(false);
                       }}
                       className="w-full px-3 py-1.5 text-xs font-mono text-left hover:bg-background-secondary transition-colors text-text-secondary"
                     >
-                      {opt.label}
+                      {Math.round(level * 100)}%
                     </button>
                   ))}
                 </div>

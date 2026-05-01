@@ -195,6 +195,9 @@ export const EditorStage: React.FC<EditorStageProps> = ({
               rotation={rect.rotation}
               opacity={0}
               fill="transparent"
+              /* Intentionally invisible — these Rects exist only for hit-testing
+                 and to host the Konva.Transformer. The actual frame rendering
+                 happens on the underlying <canvas> element. */
               draggable={isSelected}
               onClick={(e) => {
                 e.evt.stopPropagation();
