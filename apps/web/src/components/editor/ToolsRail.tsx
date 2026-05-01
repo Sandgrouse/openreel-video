@@ -55,7 +55,10 @@ export const ToolsRail: React.FC<ToolsRailProps> = ({
             <Icon size={15} />
             <span className="text-[8px] mt-0.5 leading-none">{tool.shortcut}</span>
             {/* Tooltip */}
-            <div className="absolute left-full ml-2 px-2 py-1 bg-background-elevated border border-border rounded text-[10px] text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+            <div
+              role="tooltip"
+              className="absolute left-full ml-2 px-2 py-1 bg-background-elevated border border-border rounded text-[10px] text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50"
+            >
               {tool.label}
               {tool.stubbed && (
                 <span className="ml-1 text-text-muted">(soon)</span>

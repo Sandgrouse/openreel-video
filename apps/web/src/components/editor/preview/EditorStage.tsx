@@ -197,7 +197,7 @@ export const EditorStage: React.FC<EditorStageProps> = ({
               fill="transparent"
               draggable={isSelected}
               onClick={(e) => {
-                e.cancelBubble = true;
+                e.evt.stopPropagation();
                 onSelectClip(clip.id);
               }}
               onDragMove={(e) => {

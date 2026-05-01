@@ -4629,20 +4629,25 @@ export const Preview: React.FC = () => {
         switch (e.key.toLowerCase()) {
           case "v":
             setActiveTool("move");
+            e.preventDefault();
             break;
           case "s":
             setActiveTool("scale");
+            e.preventDefault();
             break;
           case "r":
             setActiveTool("rotate");
+            e.preventDefault();
             break;
           case "c":
             setActiveTool("crop");
             toast.info("Crop tool — coming soon!");
+            e.preventDefault();
             break;
           case "t":
             setActiveTool("text");
             toast.info("Text tool — coming soon!");
+            e.preventDefault();
             break;
         }
       }
