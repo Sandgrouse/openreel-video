@@ -41,6 +41,8 @@
     "tailwind-merge": "^3.4.0",
     "three": "^0.182.0",
     "uuid": "^13.0.0",
+    "konva": "^10.3.0",
+    "react-konva": "^18.2.14",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
