@@ -3,98 +3,90 @@ import { Stage, Layer, Rect, Transformer } from "react-konva";
 import type Konva from "konva";
 import type { Clip } from "@openreel/core";
 
-export interface ClipBoundsInfo {
-  clipId: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation?: number;
+export interface VisibleClip extends Clip {
+  trackId: string;
+  /** Source media width (pixels) — used to compute natural contain-fit draw size */
+  mediaWidth: number;
+  /** Source media height (pixels) */
+  mediaHeight: number;
 }
 
 interface EditorStageProps {
-  /** Display width of the stage (px) */
+  /** Display width of the stage (px) — matches the canvas element's CSS width */
   stageWidth: number;
   /** Display height of the stage (px) */
   stageHeight: number;
-  /** Project canvas width (px) */
+  /** Project canvas width (px) — e.g. 1080 for 9:16 */
   canvasWidth: number;
-  /** Project canvas height (px) */
+  /** Project canvas height (px) — e.g. 1920 for 9:16 */
   canvasHeight: number;
-  /** All video/image clips visible at the current time */
-  visibleClips: Array<Clip & { trackId: string }>;
-  /** ID of the currently selected clip (if any) */
+  /** All video/image clips visible at the current playhead */
+  visibleClips: VisibleClip[];
+  /** ID of the currently selected clip */
   selectedClipId: string | null;
-  /** Called when user clicks a clip on stage to select it */
   onSelectClip: (clipId: string) => void;
-  /** Called when user clicks empty stage space (deselect) */
   onDeselectAll: () => void;
-  /** Called live on every drag-move with new position (in project coords, pixels) */
+  /** Live drag update (project coords, px offset from canvas center) */
   onClipDragMove: (clipId: string, x: number, y: number) => void;
-  /** Called on drag end to commit the undo entry */
   onClipDragEnd: (clipId: string, x: number, y: number) => void;
-  /** Called live on every transform change (scale & rotation) */
+  /** Live transform update (new project scale + rotation + position) */
   onClipTransform: (
     clipId: string,
     scaleX: number,
     scaleY: number,
     rotation: number,
+    x: number,
+    y: number,
   ) => void;
-  /** Called on transform end to commit the undo entry */
   onClipTransformEnd: (
     clipId: string,
     scaleX: number,
     scaleY: number,
     rotation: number,
+    x: number,
+    y: number,
   ) => void;
-  /** Whether Shift is held (keep aspect ratio when false) */
+  /** When true, the Transformer preserves the clip's aspect ratio */
   keepRatio: boolean;
 }
 
 /**
- * Convert a clip's normalized transform to pixel-space stage coordinates.
- * Position in the project store uses pixel offsets from center.
- * Scale uses fractions of the full canvas (1.0 = full canvas width/height).
+ * Compute the "natural" draw size (at scale=1.0) matching drawFrameWithTransform's
+ * contain-fit logic. At scale=1.0, the video frame fits entirely inside the canvas
+ * while preserving its aspect ratio (letterbox or pillarbox).
+ *
+ * drawFrameWithTransform does:
+ *   ctx.scale(t.scale.x, t.scale.y);
+ *   ctx.drawImage(frame, -natW/2, -natH/2, natW, natH);
+ *
+ * So the actual rendered frame at scaleX=sx occupies natW*sx × natH*sy on the canvas.
+ * Knowing natW/natH lets the overlay place handles exactly on the video frame.
  */
-function clipToStageRect(
-  clip: Clip,
+function naturalDrawSize(
+  mediaWidth: number,
+  mediaHeight: number,
   canvasWidth: number,
   canvasHeight: number,
-  displayScale: number,
-) {
-  const t = clip.transform ?? {
-    position: { x: 0, y: 0 },
-    scale: { x: 1, y: 1 },
-    rotation: 0,
-    opacity: 1,
-    anchor: { x: 0.5, y: 0.5 },
-  };
-
-  const clipW = canvasWidth * t.scale.x * displayScale;
-  const clipH = canvasHeight * t.scale.y * displayScale;
-
-  // Center of stage in display coords
-  const stageCenterX = (canvasWidth * displayScale) / 2;
-  const stageCenterY = (canvasHeight * displayScale) / 2;
-
-  // Position offset (project stores offset in project px from center)
-  const cx = stageCenterX + t.position.x * displayScale;
-  const cy = stageCenterY + t.position.y * displayScale;
-
-  return {
-    x: cx - clipW / 2,
-    y: cy - clipH / 2,
-    width: clipW,
-    height: clipH,
-    rotation: t.rotation ?? 0,
-    opacity: t.opacity ?? 1,
-  };
+): { w: number; h: number } {
+  if (!mediaWidth || !mediaHeight) {
+    return { w: canvasWidth, h: canvasHeight };
+  }
+  const srcAspect = mediaWidth / mediaHeight;
+  const cvAspect = canvasWidth / canvasHeight;
+  if (srcAspect > cvAspect) {
+    // Landscape source on portrait (or narrower) canvas — letterbox top/bottom
+    return { w: canvasWidth, h: canvasWidth / srcAspect };
+  } else {
+    // Portrait (or equal) source — pillarbox left/right
+    return { w: canvasHeight * srcAspect, h: canvasHeight };
+  }
 }
 
 /**
  * Transparent Konva overlay placed on top of the video canvas.
- * Handles click-to-select and shows Konva.Transformer handles for the
- * selected clip. The underlying canvas still does the actual rendering.
+ * Provides click-to-select and Konva.Transformer handles (resize + rotate)
+ * for the selected clip. All actual rendering is done by the underlying <canvas>;
+ * this overlay is purely for interaction.
  */
 export const EditorStage: React.FC<EditorStageProps> = ({
   stageWidth,
@@ -114,14 +106,15 @@ export const EditorStage: React.FC<EditorStageProps> = ({
   const transformerRef = useRef<Konva.Transformer>(null);
   const shapeRefs = useRef<Map<string, Konva.Rect>>(new Map());
 
-  // Scale factor from project coords to display coords
+  // Scale factor: project canvas pixels → stage display pixels
   const displayScale = stageWidth / canvasWidth;
+  const stageCenterX = (canvasWidth * displayScale) / 2;
+  const stageCenterY = (canvasHeight * displayScale) / 2;
 
   // Attach transformer to the selected node when selection changes
   useEffect(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
-
     if (selectedClipId) {
       const node = shapeRefs.current.get(selectedClipId);
       if (node) {
@@ -134,7 +127,6 @@ export const EditorStage: React.FC<EditorStageProps> = ({
     }
   }, [selectedClipId]);
 
-  // Update keepRatio on the transformer whenever the prop changes
   useEffect(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
@@ -144,10 +136,7 @@ export const EditorStage: React.FC<EditorStageProps> = ({
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // If clicking on empty space (stage itself, not a shape)
-      if (e.target === e.target.getStage()) {
-        onDeselectAll();
-      }
+      if (e.target === e.target.getStage()) onDeselectAll();
     },
     [onDeselectAll],
   );
@@ -169,35 +158,55 @@ export const EditorStage: React.FC<EditorStageProps> = ({
     >
       <Layer>
         {visibleClips.map((clip) => {
-          const rect = clipToStageRect(
-            clip,
+          const t = clip.transform;
+          const { w: natW, h: natH } = naturalDrawSize(
+            clip.mediaWidth,
+            clip.mediaHeight,
             canvasWidth,
             canvasHeight,
-            displayScale,
           );
+
+          /*
+           * Layout strategy: x/y = visual center of the clip.
+           *
+           * With offsetX = dispW/2, offsetY = dispH/2:
+           *   visual center = (x, y) regardless of scaleX/scaleY/rotation.
+           * This means:
+           *   - node.x() always returns the clip's visual center X in stage coords.
+           *   - node.scaleX() directly equals the project's scale.x value.
+           *   - The Transformer's resize/rotate anchors work correctly around center.
+           *
+           * Project ↔ stage coordinate conversions:
+           *   project_x = (node.x() - stageCenterX) / displayScale
+           *   project_scale_x = node.scaleX()   (because width = natW * displayScale at scale=1)
+           */
+          const dispW = natW * displayScale;
+          const dispH = natH * displayScale;
+          const cx = stageCenterX + t.position.x * displayScale;
+          const cy = stageCenterY + t.position.y * displayScale;
           const isSelected = clip.id === selectedClipId;
 
           return (
             <Rect
               key={clip.id}
               ref={(node) => {
-                if (node) {
-                  shapeRefs.current.set(clip.id, node);
-                } else {
-                  shapeRefs.current.delete(clip.id);
-                }
+                if (node) shapeRefs.current.set(clip.id, node);
+                else shapeRefs.current.delete(clip.id);
               }}
               id={clip.id}
-              x={rect.x}
-              y={rect.y}
-              width={rect.width}
-              height={rect.height}
-              rotation={rect.rotation}
+              x={cx}
+              y={cy}
+              offsetX={dispW / 2}
+              offsetY={dispH / 2}
+              width={dispW}
+              height={dispH}
+              scaleX={t.scale.x}
+              scaleY={t.scale.y}
+              rotation={t.rotation ?? 0}
               opacity={0}
               fill="transparent"
-              /* Intentionally invisible — these Rects exist only for hit-testing
-                 and to host the Konva.Transformer. The actual frame rendering
-                 happens on the underlying <canvas> element. */
+              /* Intentionally invisible — only for hit-testing + Transformer.
+                 Actual video rendering is on the underlying <canvas> element. */
               draggable={isSelected}
               onClick={(e) => {
                 e.evt.stopPropagation();
@@ -205,24 +214,19 @@ export const EditorStage: React.FC<EditorStageProps> = ({
               }}
               onDragMove={(e) => {
                 const node = e.target as Konva.Rect;
-                // Convert stage coords back to project coords (offset from center)
-                const stageCenterX = (canvasWidth * displayScale) / 2;
-                const stageCenterY = (canvasHeight * displayScale) / 2;
-                const nodeCx = node.x() + node.width() / 2;
-                const nodeCy = node.y() + node.height() / 2;
-                const projectX = (nodeCx - stageCenterX) / displayScale;
-                const projectY = (nodeCy - stageCenterY) / displayScale;
-                onClipDragMove(clip.id, projectX, projectY);
+                onClipDragMove(
+                  clip.id,
+                  (node.x() - stageCenterX) / displayScale,
+                  (node.y() - stageCenterY) / displayScale,
+                );
               }}
               onDragEnd={(e) => {
                 const node = e.target as Konva.Rect;
-                const stageCenterX = (canvasWidth * displayScale) / 2;
-                const stageCenterY = (canvasHeight * displayScale) / 2;
-                const nodeCx = node.x() + node.width() / 2;
-                const nodeCy = node.y() + node.height() / 2;
-                const projectX = (nodeCx - stageCenterX) / displayScale;
-                const projectY = (nodeCy - stageCenterY) / displayScale;
-                onClipDragEnd(clip.id, projectX, projectY);
+                onClipDragEnd(
+                  clip.id,
+                  (node.x() - stageCenterX) / displayScale,
+                  (node.y() - stageCenterY) / displayScale,
+                );
               }}
               onTransform={(e) => {
                 const node = e.target as Konva.Rect;
@@ -231,6 +235,8 @@ export const EditorStage: React.FC<EditorStageProps> = ({
                   node.scaleX(),
                   node.scaleY(),
                   node.rotation(),
+                  (node.x() - stageCenterX) / displayScale,
+                  (node.y() - stageCenterY) / displayScale,
                 );
               }}
               onTransformEnd={(e) => {
@@ -240,14 +246,9 @@ export const EditorStage: React.FC<EditorStageProps> = ({
                   node.scaleX(),
                   node.scaleY(),
                   node.rotation(),
+                  (node.x() - stageCenterX) / displayScale,
+                  (node.y() - stageCenterY) / displayScale,
                 );
-                // Reset node scale so Konva doesn't stack scales on subsequent transforms
-                const newW = node.width() * node.scaleX();
-                const newH = node.height() * node.scaleY();
-                node.scaleX(1);
-                node.scaleY(1);
-                node.width(newW);
-                node.height(newH);
               }}
             />
           );
@@ -269,10 +270,8 @@ export const EditorStage: React.FC<EditorStageProps> = ({
             "bottom-right",
           ]}
           boundBoxFunc={(oldBox, newBox) => {
-            // Prevent scaling to zero or negative size
-            if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) {
+            if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5)
               return oldBox;
-            }
             return newBox;
           }}
           anchorSize={10}

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ChevronDown, Zap, Captions, Loader2 } from "lucide-react";
+import { ChevronDown, Zap, Captions, Loader2, Link, Link2Off } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
@@ -187,6 +187,9 @@ export const InspectorPanel: React.FC = () => {
   const selectedClipIds = getSelectedClipIds();
   const getTitleEngine = useEngineStore((state) => state.getTitleEngine);
   const getGraphicsEngine = useEngineStore((state) => state.getGraphicsEngine);
+
+  /** Whether Scale X and Scale Y are linked for uniform scaling */
+  const [lockScale, setLockScale] = useState(true);
 
   // Transcription state
   const [transcriptionProgress, setTranscriptionProgress] =
@@ -655,24 +658,47 @@ export const InspectorPanel: React.FC = () => {
                   <LabeledSlider
                     label="Scale X"
                     value={transform.scale.x * 100}
-                    onChange={(x) =>
+                    onChange={(x) => {
+                      const newX = x / 100;
                       handleTransformChange({
-                        scale: { ...transform.scale, x: x / 100 },
-                      })
-                    }
+                        scale: lockScale
+                          ? { x: newX, y: newX }
+                          : { ...transform.scale, x: newX },
+                      });
+                    }}
                     min={0}
                     max={300}
                     step={1}
                     unit="%"
                   />
+                  {/* Lock / Unlock uniform scale */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-px bg-border" />
+                    <button
+                      onClick={() => setLockScale((v) => !v)}
+                      title={lockScale ? "Unlock proportional scaling" : "Lock proportional scaling"}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] transition-colors ${
+                        lockScale
+                          ? "bg-primary/20 text-primary border border-primary/40"
+                          : "bg-background-tertiary text-text-secondary border border-border hover:bg-background-elevated"
+                      }`}
+                    >
+                      {lockScale ? <Link size={9} /> : <Link2Off size={9} />}
+                      {lockScale ? "Proportional" : "Free"}
+                    </button>
+                    <div className="flex-1 h-px bg-border" />
+                  </div>
                   <LabeledSlider
                     label="Scale Y"
                     value={transform.scale.y * 100}
-                    onChange={(y) =>
+                    onChange={(y) => {
+                      const newY = y / 100;
                       handleTransformChange({
-                        scale: { ...transform.scale, y: y / 100 },
-                      })
-                    }
+                        scale: lockScale
+                          ? { x: newY, y: newY }
+                          : { ...transform.scale, y: newY },
+                      });
+                    }}
                     min={0}
                     max={300}
                     step={1}

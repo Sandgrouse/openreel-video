@@ -244,7 +244,7 @@ export const Preview: React.FC = () => {
   const [interactionMode, setInteractionMode] =
     useState<InteractionMode>("none");
   const [activeHandle, setActiveHandle] = useState<HandlePosition | null>(null);
-  const [lockAspectRatio, setLockAspectRatio] = useState(true);
+  const [lockAspectRatio, setLockAspectRatio] = useState(false);
   const interactionStartRef = useRef<{
     x: number;
     y: number;
@@ -3656,7 +3656,7 @@ export const Preview: React.FC = () => {
 
   /** All video/image clips visible at the current playhead position — used by EditorStage */
   const visibleVideoClips = useMemo(() => {
-    const result: Array<(typeof timelineTracks)[0]["clips"][0] & { trackId: string }> = [];
+    const result: Array<(typeof timelineTracks)[0]["clips"][0] & { trackId: string; mediaWidth: number; mediaHeight: number }> = [];
     for (const track of timelineTracks) {
       if (track.type !== "video" && track.type !== "image") continue;
       if (track.hidden) continue;
@@ -3665,12 +3665,18 @@ export const Preview: React.FC = () => {
           playheadPosition >= clip.startTime &&
           playheadPosition < clip.startTime + clip.duration
         ) {
-          result.push({ ...clip, trackId: track.id });
+          const media = getMediaItem(clip.mediaId);
+          result.push({
+            ...clip,
+            trackId: track.id,
+            mediaWidth: media?.metadata.width ?? 0,
+            mediaHeight: media?.metadata.height ?? 0,
+          });
         }
       }
     }
     return result;
-  }, [timelineTracks, playheadPosition]);
+  }, [timelineTracks, playheadPosition, getMediaItem]);
 
   const clipAtPlayhead = useMemo(() => {
     const videoTracks = timelineTracks.filter(
@@ -4701,12 +4707,13 @@ export const Preview: React.FC = () => {
     [updateClipTransform],
   );
 
-  /** Live transform (scale / rotation) update during Konva transform */
+  /** Live transform (scale / rotation / position) update during Konva transform */
   const handleKonvaTransform = useCallback(
-    (clipId: string, scaleX: number, scaleY: number, rotation: number) => {
+    (clipId: string, scaleX: number, scaleY: number, rotation: number, x: number, y: number) => {
       updateClipTransform(clipId, {
         scale: { x: scaleX, y: scaleY },
         rotation,
+        position: { x, y },
       });
     },
     [updateClipTransform],
@@ -4714,10 +4721,11 @@ export const Preview: React.FC = () => {
 
   /** Commit final transform on transform end */
   const handleKonvaTransformEnd = useCallback(
-    (clipId: string, scaleX: number, scaleY: number, rotation: number) => {
+    (clipId: string, scaleX: number, scaleY: number, rotation: number, x: number, y: number) => {
       updateClipTransform(clipId, {
         scale: { x: scaleX, y: scaleY },
         rotation,
+        position: { x, y },
       });
     },
     [updateClipTransform],
