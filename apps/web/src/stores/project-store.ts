@@ -59,6 +59,13 @@ import {
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 
+const mediaHasEmbeddedAudio = (mediaItem: MediaItem | undefined): boolean =>
+  Boolean(
+    mediaItem &&
+      mediaItem.type === "video" &&
+      ((mediaItem.metadata?.channels ?? 0) > 0 || mediaItem.waveformData),
+  );
+
 /**
  * ProjectState - Complete state interface for project management
  *
@@ -412,9 +419,15 @@ export interface ProjectState {
 /**
  * Create the project store
  */
+const createProjectActionHistory = () => {
+  const history = new ActionHistory();
+  history.setAutoGroupWindow(0);
+  return history;
+};
+
 export const useProjectStore = create<ProjectState>()(
   subscribeWithSelector((set, get) => {
-    const actionHistory = new ActionHistory();
+    const actionHistory = createProjectActionHistory();
     const actionExecutor = new ActionExecutor(actionHistory);
 
     return {
@@ -434,7 +447,7 @@ export const useProjectStore = create<ProjectState>()(
         name?: string,
         settings?: Partial<ProjectSettings>,
       ) => {
-        const newHistory = new ActionHistory();
+        const newHistory = createProjectActionHistory();
         const newExecutor = new ActionExecutor(newHistory);
         set({
           project: createEmptyProject(name, settings),
@@ -465,7 +478,7 @@ export const useProjectStore = create<ProjectState>()(
           }
         }
 
-        const newHistory = new ActionHistory();
+        const newHistory = createProjectActionHistory();
         const newExecutor = new ActionExecutor(newHistory);
 
         // Fix legacy projects where timeline.duration was never persisted
@@ -1176,7 +1189,9 @@ export const useProjectStore = create<ProjectState>()(
 
       // Clip actions
       addClip: async (trackId: string, mediaId: string, startTime: number) => {
-        const { project, actionExecutor } = get();
+        const { project, actionExecutor, getMediaItem } = get();
+        const targetTrack = project.timeline.tracks.find((track) => track.id === trackId);
+        const mediaItem = getMediaItem(mediaId);
 
         // IMPORTANT: Deep clone the project BEFORE mutation
         // actionExecutor mutates the project directly, so we need a fresh copy
@@ -1199,6 +1214,10 @@ export const useProjectStore = create<ProjectState>()(
           };
 
           set({ project: finalProject });
+
+          if (targetTrack?.type === "video" && mediaHasEmbeddedAudio(mediaItem)) {
+            await get().separateAudio(`clip-${action.id}`);
+          }
         }
         return result;
       },
@@ -1239,9 +1258,14 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         const { project: updatedProject, actionExecutor: exec } = get();
-        const newTrack = updatedProject.timeline.tracks.find(
-          (t) => t.clips.length === 0 && t.type === trackType,
-        );
+        const newTrackId = trackResult.actionId
+          ? `track-${trackResult.actionId}`
+          : undefined;
+        const newTrack =
+          updatedProject.timeline.tracks.find((t) => t.id === newTrackId) ??
+          updatedProject.timeline.tracks.find(
+            (t) => t.clips.length === 0 && t.type === trackType,
+          );
 
         if (!newTrack) {
           return {
@@ -1269,6 +1293,10 @@ export const useProjectStore = create<ProjectState>()(
             modifiedAt: Date.now(),
           };
           set({ project: finalProject });
+
+          if (trackType === "video" && mediaHasEmbeddedAudio(mediaItem)) {
+            await get().separateAudio(`clip-${action.id}`);
+          }
         }
         return result;
       },
@@ -1291,12 +1319,7 @@ export const useProjectStore = create<ProjectState>()(
           (m) => m.id === videoClip.mediaId,
         );
 
-        if (
-          !mediaItem ||
-          mediaItem.type !== "video" ||
-          !mediaItem.metadata?.channels ||
-          mediaItem.metadata.channels === 0
-        ) {
+        if (!mediaHasEmbeddedAudio(mediaItem)) {
           return {
             success: false,
             error: {
@@ -1304,6 +1327,19 @@ export const useProjectStore = create<ProjectState>()(
               message: "Media has no audio to separate",
             },
           };
+        }
+
+        const existingLinkedAudioClip = project.timeline.tracks
+          .flatMap((t) => t.clips)
+          .find(
+            (clip) =>
+              clip.mediaId === videoClip.mediaId &&
+              clip.parentClipId === videoClip.id &&
+              clip.linkRole === "audio-child",
+          );
+
+        if (existingLinkedAudioClip) {
+          return { success: true, actionId: existingLinkedAudioClip.id };
         }
 
         let audioTrack = project.timeline.tracks.find((t) => t.type === "audio");
@@ -1320,6 +1356,8 @@ export const useProjectStore = create<ProjectState>()(
           }
           const { project: updatedProject } = get();
           audioTrack = updatedProject.timeline.tracks.find(
+            (t) => t.id === `track-${trackResult.actionId}`,
+          ) ?? updatedProject.timeline.tracks.find(
             (t) => t.type === "audio",
           );
         }
@@ -1343,6 +1381,9 @@ export const useProjectStore = create<ProjectState>()(
             trackId: audioTrack.id,
             mediaId: videoClip.mediaId,
             startTime: videoClip.startTime,
+            parentClipId: videoClip.id,
+            linkedClipId: videoClip.id,
+            linkRole: "audio-child",
           },
         };
 
@@ -2587,7 +2628,7 @@ export const useProjectStore = create<ProjectState>()(
             }
           }
 
-          const newHistory = new ActionHistory();
+          const newHistory = createProjectActionHistory();
           const newExecutor = new ActionExecutor(newHistory);
           set({
             project: projectWithMedia,

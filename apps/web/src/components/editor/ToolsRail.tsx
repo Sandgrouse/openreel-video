@@ -17,7 +17,7 @@ interface ToolItem {
 
 const TOOLS: ToolItem[] = [
   { id: "move",   icon: MousePointer2, label: "Move",   shortcut: "V" },
-  { id: "scale",  icon: Maximize2,     label: "Scale",  shortcut: "S" },
+  { id: "scale",  icon: Maximize2,     label: "Scale",  shortcut: "E" },
   { id: "rotate", icon: RotateCcw,     label: "Rotate", shortcut: "R" },
 ];
 
@@ -25,7 +25,7 @@ export const ToolsRail: React.FC<ToolsRailProps> = ({
   activeTool,
   onToolChange,
 }) => (
-  <div className="flex flex-col items-center gap-1 py-3 px-1 bg-background-secondary border-r border-border z-10">
+  <div className="flex items-center gap-1 rounded-lg border border-border bg-background-tertiary/80 p-1">
     {TOOLS.map((tool) => {
       const Icon = tool.icon;
       const isActive = activeTool === tool.id;
@@ -43,10 +43,9 @@ export const ToolsRail: React.FC<ToolsRailProps> = ({
           >
             <Icon size={16} />
           </button>
-          {/* Tooltip — visible only on hover */}
           <div
             role="tooltip"
-            className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-background-elevated border border-border rounded text-[10px] text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50"
+            className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 px-2 py-1 bg-background-elevated border border-border rounded text-[10px] text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50"
           >
             {tool.label}
             <span className="ml-1 text-text-muted">({tool.shortcut})</span>

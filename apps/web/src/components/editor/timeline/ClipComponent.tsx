@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Image } from "lucide-react";
+import { Image, Link2 } from "lucide-react";
 import type { Clip, Track } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -83,10 +83,12 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
   const left = clip.startTime * pixelsPerSecond;
   const width = clip.duration * pixelsPerSecond;
+  const visibleWidth = Math.max(width, 4);
 
   const isVideo = track.type === "video";
   const isAudio = track.type === "audio";
   const isImage = track.type === "image";
+  const isLinkedAudioChild = isAudio && clip.linkRole === "audio-child" && clip.parentClipId;
   const clipStyle = getClipStyle(track.type);
 
   const handleClick = (e: React.MouseEvent) => {
@@ -335,7 +337,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     };
   }, [isTrimming, trimEdge, clip.id, pixelsPerSecond, onTrimClip]);
 
-  const thumbnailCount = Math.max(1, Math.floor(width / 60));
+  const thumbnailCount = Math.max(1, Math.floor(visibleWidth / 60));
   const clipName = mediaItem?.name || clip.mediaId.slice(0, 8);
 
   const isInteracting = isDragging || isTrimming;
@@ -347,7 +349,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           ref={clipRef}
           onClick={handleClick}
           onMouseDown={handleMouseDown}
-          className={`group absolute top-1 bottom-1 rounded-lg overflow-hidden shadow-sm ${
+          className={`clip-component group absolute top-1 bottom-1 rounded-lg overflow-hidden shadow-sm ${
             isDragging
               ? `cursor-grabbing z-50 ${isInvalidDrop ? "opacity-50 ring-2 ring-red-500 border-red-500" : "opacity-90 shadow-xl"}`
               : "cursor-grab"
@@ -362,7 +364,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             transform: isDragging
               ? `translate(${left}px, ${dragYOffset}px)`
               : `translateX(${left}px)`,
-            width: `${width}px`,
+            width: `${visibleWidth}px`,
             willChange: isInteracting ? 'transform, width' : 'auto',
             transition: isInteracting ? 'none' : 'opacity 150ms, box-shadow 150ms',
             pointerEvents: isDragging ? 'none' : 'auto',
@@ -430,13 +432,16 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         </div>
       )}
 
-      <div className="w-full h-full flex flex-col justify-end px-2 pb-1 relative z-10 pointer-events-none">
+      <div className="w-full h-full flex flex-col justify-end px-1.5 pb-1 relative z-10 pointer-events-none">
         <span
-          className={`text-[10px] font-medium truncate drop-shadow-md ${
+          className={`flex min-w-0 items-center gap-1 text-[10px] font-medium truncate drop-shadow-md ${
             isSelected ? clipStyle.selectedText : clipStyle.text
           }`}
         >
-          {clipName}
+          {isLinkedAudioChild && (
+            <Link2 size={10} className="shrink-0 text-blue-200" />
+          )}
+          <span className="truncate">{clipName}</span>
         </span>
       </div>
 

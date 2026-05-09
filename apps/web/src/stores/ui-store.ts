@@ -4,6 +4,7 @@ import { subscribeWithSelector, persist } from "zustand/middleware";
 export type PanelId =
   | "mediaLibrary"
   | "inspector"
+  | "timeline"
   | "effects"
   | "audioMixer"
   | "colorGrading"
@@ -40,6 +41,7 @@ export interface PanelState {
   width?: number;
   height?: number;
   collapsed?: boolean;
+  maximized?: boolean;
 }
 
 export interface KeyboardShortcuts {
@@ -104,7 +106,9 @@ export interface UIState {
   togglePanel: (panelId: PanelId) => void;
   setPanelVisible: (panelId: PanelId, visible: boolean) => void;
   setPanelWidth: (panelId: PanelId, width: number) => void;
+  setPanelHeight: (panelId: PanelId, height: number) => void;
   setPanelCollapsed: (panelId: PanelId, collapsed: boolean) => void;
+  setPanelMaximized: (panelId: PanelId, maximized: boolean) => void;
   setShortcut: (action: keyof KeyboardShortcuts, shortcut: string) => void;
   resetShortcuts: () => void;
   setTheme: (theme: "light" | "dark" | "system") => void;
@@ -178,10 +182,56 @@ const DEFAULT_SNAP_SETTINGS: SnapSettings = {
 const DEFAULT_PANELS: Record<PanelId, PanelState> = {
   mediaLibrary: { visible: true, width: 300 },
   inspector: { visible: true, width: 300 },
+  timeline: { visible: true, height: 320 },
   effects: { visible: false, width: 300 },
   audioMixer: { visible: false, width: 300 },
   colorGrading: { visible: false, width: 400 },
   subtitles: { visible: false, width: 300 },
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
+
+const getTimelineMaxHeight = () => {
+  if (typeof window === "undefined") return 720;
+  return Math.max(320, Math.floor(window.innerHeight * 0.7));
+};
+
+const clampPanelWidth = (panelId: PanelId, width: number) => {
+  if (panelId === "mediaLibrary" || panelId === "inspector") {
+    return clamp(width, 240, 560);
+  }
+  return clamp(width, 240, 800);
+};
+
+const clampPanelHeight = (panelId: PanelId, height: number) => {
+  if (panelId === "timeline") {
+    return clamp(height, 180, getTimelineMaxHeight());
+  }
+  return clamp(height, 180, 800);
+};
+
+const mergePanels = (
+  panels?: Partial<Record<PanelId, Partial<PanelState>>>,
+): Record<PanelId, PanelState> => {
+  const merged = { ...DEFAULT_PANELS };
+  for (const panelId of Object.keys(DEFAULT_PANELS) as PanelId[]) {
+    const panel = panels?.[panelId];
+    if (!panel) continue;
+    merged[panelId] = {
+      ...DEFAULT_PANELS[panelId],
+      ...panel,
+      width:
+        typeof panel.width === "number"
+          ? clampPanelWidth(panelId, panel.width)
+          : DEFAULT_PANELS[panelId].width,
+      height:
+        typeof panel.height === "number"
+          ? clampPanelHeight(panelId, panel.height)
+          : DEFAULT_PANELS[panelId].height,
+    };
+  }
+  return merged;
 };
 
 export const useUIStore = create<UIState>()(
@@ -399,8 +449,19 @@ export const useUIStore = create<UIState>()(
               ...state.panels,
               [panelId]: {
                 ...state.panels[panelId],
-                // Clamp width between min (200px) and max (800px) for usability
-                width: Math.max(200, Math.min(800, width)),
+                width: clampPanelWidth(panelId, width),
+              },
+            },
+          }));
+        },
+
+        setPanelHeight: (panelId: PanelId, height: number) => {
+          set((state) => ({
+            panels: {
+              ...state.panels,
+              [panelId]: {
+                ...state.panels[panelId],
+                height: clampPanelHeight(panelId, height),
               },
             },
           }));
@@ -416,6 +477,19 @@ export const useUIStore = create<UIState>()(
               },
             },
           }));
+        },
+
+        setPanelMaximized: (panelId: PanelId, maximized: boolean) => {
+          set((state) => {
+            const panels = { ...state.panels };
+            for (const id of Object.keys(panels) as PanelId[]) {
+              panels[id] = {
+                ...panels[id],
+                maximized: id === panelId ? maximized : false,
+              };
+            }
+            return { panels };
+          });
         },
 
         setShortcut: (action: keyof KeyboardShortcuts, shortcut: string) => {
@@ -532,13 +606,24 @@ export const useUIStore = create<UIState>()(
       }),
       {
         name: "openreel-ui-preferences",
-        version: 1,
+        version: 2,
         migrate: (persisted: unknown, version: number) => {
           const state = persisted as Record<string, unknown>;
           if (version === 0) {
             state.snapSettings = DEFAULT_SNAP_SETTINGS;
           }
+          state.panels = mergePanels(
+            state.panels as Partial<Record<PanelId, Partial<PanelState>>>,
+          );
           return state;
+        },
+        merge: (persisted, current) => {
+          const persistedState = persisted as Partial<UIState> | undefined;
+          return {
+            ...current,
+            ...persistedState,
+            panels: mergePanels(persistedState?.panels),
+          };
         },
         partialize: (state) => ({
           snapSettings: state.snapSettings,

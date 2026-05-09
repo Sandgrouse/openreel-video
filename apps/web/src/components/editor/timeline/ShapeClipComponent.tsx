@@ -183,7 +183,7 @@ export const ShapeClipComponent: React.FC<ShapeClipComponentProps> = ({
           ref={clipRef}
           onClick={handleClick}
           onMouseDown={handleMouseDown}
-          className={`absolute top-1 bottom-1 rounded-lg overflow-hidden cursor-grab group ${
+          className={`clip-component absolute top-1 bottom-1 rounded-lg overflow-hidden cursor-grab group ${
             isDragging ? "cursor-grabbing opacity-75" : ""
           } ${
             isSelected
@@ -192,7 +192,7 @@ export const ShapeClipComponent: React.FC<ShapeClipComponentProps> = ({
           } bg-${colorClass}-500/20 border`}
           style={{
             transform: `translateX(${left}px)`,
-            width: `${Math.max(width, 40)}px`,
+            width: `${Math.max(width, 6)}px`,
             willChange: isInteracting ? 'transform, width' : 'auto',
             transition: isInteracting ? 'none' : 'opacity 150ms, box-shadow 150ms',
           }}

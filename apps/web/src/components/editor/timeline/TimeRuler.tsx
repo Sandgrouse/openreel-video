@@ -71,7 +71,22 @@ export const TimeRuler: React.FC<TimeRulerProps> = ({
     if (safePixelsPerSecond > 20) {
       return { minor: 1, major: 5, labelEvery: 5 };
     }
-    return { minor: 5, major: 10, labelEvery: 10 };
+    if (safePixelsPerSecond > 5) {
+      return { minor: 5, major: 10, labelEvery: 10 };
+    }
+    if (safePixelsPerSecond > 1) {
+      return { minor: 30, major: 60, labelEvery: 60 };
+    }
+    if (safePixelsPerSecond > 0.2) {
+      return { minor: 60, major: 300, labelEvery: 300 };
+    }
+    if (safePixelsPerSecond > 0.05) {
+      return { minor: 300, major: 600, labelEvery: 600 };
+    }
+    if (safePixelsPerSecond > 0.01) {
+      return { minor: 600, major: 1800, labelEvery: 1800 };
+    }
+    return { minor: 1800, major: 3600, labelEvery: 3600 };
   };
 
   const tickConfig = getTickConfig();
@@ -150,6 +165,7 @@ export const TimeRuler: React.FC<TimeRulerProps> = ({
       className={`h-8 border-b border-border flex items-end relative bg-background-secondary select-none ${
         isDragging ? "cursor-grabbing" : "cursor-pointer"
       }`}
+      onClick={(e) => e.stopPropagation()}
       onMouseDown={handleMouseDown}
       style={{ cursor: isDragging ? "grabbing" : "pointer" }}
     >

@@ -569,7 +569,9 @@ export const AssetsPanel: React.FC = () => {
   const { retryTask } = useKieAIStore();
 
   // UI store
-  const { select, isSelected, startDrag } = useUIStore();
+  const { panels, select, isSelected, startDrag, setPanelVisible, setPanelMaximized } =
+    useUIStore();
+  const isMaximized = panels.mediaLibrary?.maximized ?? false;
 
   // Count missing assets
   const missingAssetsCount = mediaItems.filter(
@@ -891,7 +893,7 @@ export const AssetsPanel: React.FC = () => {
   return (
     <div
       data-tour="assets"
-      className="w-80 bg-background-secondary border-r border-border flex flex-col h-full relative"
+      className="bg-background-secondary border-r border-border flex flex-col h-full relative"
     >
       {/* Loading overlay */}
       {isImporting && (
@@ -908,8 +910,19 @@ export const AssetsPanel: React.FC = () => {
             onClick={triggerFileInput}
             title="Import media"
           />
-          <IconButton icon={Maximize2} title="Maximize panel" />
-          <IconButton icon={X} title="Close panel" />
+          <IconButton
+            icon={Maximize2}
+            onClick={() => setPanelMaximized("mediaLibrary", !isMaximized)}
+            title={isMaximized ? "Restore panel" : "Maximize panel"}
+          />
+          <IconButton
+            icon={X}
+            onClick={() => {
+              setPanelMaximized("mediaLibrary", false);
+              setPanelVisible("mediaLibrary", false);
+            }}
+            title="Close panel"
+          />
         </div>
       </div>
 

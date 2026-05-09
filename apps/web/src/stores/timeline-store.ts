@@ -2,9 +2,9 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 export const ZOOM_PRESETS = {
-  MIN: 10,
+  MIN: 0.01,
   DEFAULT: 50,
-  MAX: 500,
+  MAX: 5000,
 } as const;
 
 export type PlaybackState = "stopped" | "playing" | "paused";
@@ -172,20 +172,17 @@ export const useTimelineStore = create<TimelineState>()(
 
     zoomIn: () => {
       const { pixelsPerSecond } = get();
-      // Scale zoom by 1.5x but never exceed max to prevent performance issues at extreme zoom
       const newZoom = Math.min(pixelsPerSecond * 1.5, ZOOM_PRESETS.MAX);
       set({ pixelsPerSecond: newZoom });
     },
 
     zoomOut: () => {
       const { pixelsPerSecond } = get();
-      // Scale zoom down by 1.5x but never go below min to prevent blur at extreme zoom out
       const newZoom = Math.max(pixelsPerSecond / 1.5, ZOOM_PRESETS.MIN);
       set({ pixelsPerSecond: newZoom });
     },
 
     setZoom: (pixelsPerSecond: number) => {
-      // Clamp zoom to valid range to ensure consistent rendering and prevent sub-pixel issues
       const clampedZoom = Math.max(
         ZOOM_PRESETS.MIN,
         Math.min(ZOOM_PRESETS.MAX, pixelsPerSecond),
@@ -196,8 +193,6 @@ export const useTimelineStore = create<TimelineState>()(
     zoomToFit: (duration: number) => {
       const { viewportWidth } = get();
       if (duration > 0) {
-        // Calculate zoom that fits entire timeline in viewport, leaving 100px margin for UI
-        // Formula: pixels_per_second = available_width / duration_seconds
         const newZoom = Math.max(
           ZOOM_PRESETS.MIN,
           Math.min(ZOOM_PRESETS.MAX, (viewportWidth - 100) / duration),

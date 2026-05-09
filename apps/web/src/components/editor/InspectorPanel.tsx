@@ -1,5 +1,14 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ChevronDown, Zap, Captions, Loader2, Link, Link2Off } from "lucide-react";
+import {
+  ChevronDown,
+  Zap,
+  Captions,
+  Loader2,
+  Link,
+  Link2Off,
+  Maximize2,
+  X,
+} from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
@@ -54,6 +63,7 @@ import {
   DEFAULT_EQ_BANDS,
 } from "../../bridges/audio-bridge-effects";
 import {
+  IconButton,
   Input,
   LabeledSlider,
   Switch,
@@ -183,8 +193,10 @@ export const InspectorPanel: React.FC = () => {
     useProjectStore();
   const project = useProjectStore((state) => state.project);
   const { getSelectedClipIds } = useUIStore();
+  const { panels, setPanelVisible, setPanelMaximized } = useUIStore();
   const selectedItems = useUIStore((state) => state.selectedItems);
   const selectedClipIds = getSelectedClipIds();
+  const isPanelMaximized = panels.inspector?.maximized ?? false;
   const getTitleEngine = useEngineStore((state) => state.getTitleEngine);
   const getGraphicsEngine = useEngineStore((state) => state.getGraphicsEngine);
 
@@ -606,12 +618,29 @@ export const InspectorPanel: React.FC = () => {
   return (
     <div
       data-tour="inspector"
-      className="w-80 bg-background-secondary border-l border-border flex flex-col overflow-y-auto h-full custom-scrollbar"
+      className="bg-background-secondary border-l border-border flex flex-col overflow-y-auto h-full custom-scrollbar"
     >
       <div className="p-5">
-        <h3 className="text-sm font-bold text-text-primary mb-5 tracking-tight">
-          Inspector
-        </h3>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-text-primary tracking-tight">
+            Inspector
+          </h3>
+          <div className="flex gap-1">
+            <IconButton
+              icon={Maximize2}
+              onClick={() => setPanelMaximized("inspector", !isPanelMaximized)}
+              title={isPanelMaximized ? "Restore panel" : "Maximize panel"}
+            />
+            <IconButton
+              icon={X}
+              onClick={() => {
+                setPanelMaximized("inspector", false);
+                setPanelVisible("inspector", false);
+              }}
+              title="Close panel"
+            />
+          </div>
+        </div>
 
         {selectedClip ? (
           <>

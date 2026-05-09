@@ -4617,7 +4617,7 @@ export const Preview: React.FC = () => {
     panStartRef.current = null;
   }, []);
 
-  /** Global keydown to track Space for panning, and V/S/R/C/T shortcuts */
+  /** Global keydown to track Space for panning, and V/E/R/C/T shortcuts. */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       // Skip shortcuts when typing in an input
@@ -4640,7 +4640,7 @@ export const Preview: React.FC = () => {
             setActiveTool("move");
             e.preventDefault();
             break;
-          case "s":
+          case "e":
             setActiveTool("scale");
             e.preventDefault();
             break;
@@ -4861,6 +4861,7 @@ export const Preview: React.FC = () => {
 
   const handleScrubClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      e.stopPropagation();
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const percentage = Math.max(0, Math.min(1, x / rect.width));
@@ -4991,33 +4992,30 @@ export const Preview: React.FC = () => {
         />
       )}
 
-      {/* Main workspace row: ToolsRail + Video Area */}
+      {/* Main workspace row */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Tools Rail */}
-        <ToolsRail activeTool={activeTool} onToolChange={setActiveTool} />
-
-      {/* Video Area */}
-      <div
-        className={`flex-1 relative flex items-center justify-center bg-background-secondary/30 transition-all duration-300 ${
-          isMaximized || isFullscreen ? "p-0" : "p-4"
-        } ${zoomLevel > 1 ? "overflow-auto" : ""}`}
-        onMouseMove={(e) => {
-          handleStageAreaMouseMove(e);
-          if (interactionMode !== "none") handleMouseMove(e);
-        }}
-        onMouseUp={(_e) => {
-          handleStageAreaMouseUp();
-          handleMouseUp();
-        }}
-        onMouseDown={(e) => {
-          handleStageAreaMouseDown(e);
-          handleStageAreaMiddleDown(e);
-        }}
-        onWheel={handleStageAreaWheel}
-        onDragOver={handleCanvasDragOver}
-        onDrop={handleCanvasDrop}
-        style={{ cursor: spaceHeldRef.current ? "grab" : undefined }}
-      >
+        {/* Video Area */}
+        <div
+          className={`flex-1 relative flex items-center justify-center bg-background-secondary/30 transition-all duration-300 ${
+            isMaximized || isFullscreen ? "p-0" : "p-4"
+          } ${zoomLevel > 1 ? "overflow-auto" : ""}`}
+          onMouseMove={(e) => {
+            handleStageAreaMouseMove(e);
+            if (interactionMode !== "none") handleMouseMove(e);
+          }}
+          onMouseUp={(_e) => {
+            handleStageAreaMouseUp();
+            handleMouseUp();
+          }}
+          onMouseDown={(e) => {
+            handleStageAreaMouseDown(e);
+            handleStageAreaMiddleDown(e);
+          }}
+          onWheel={handleStageAreaWheel}
+          onDragOver={handleCanvasDragOver}
+          onDrop={handleCanvasDrop}
+          style={{ cursor: spaceHeldRef.current ? "grab" : undefined }}
+        >
         <div
           ref={overlayRef}
           className={`relative bg-black overflow-hidden transition-all duration-300 ${
@@ -5433,7 +5431,7 @@ export const Preview: React.FC = () => {
         </div>
       </div>
 
-      </div>{/* end flex-1 flex row (ToolsRail + Video Area) */}
+      </div>{/* end flex-1 flex row */}
 
       {/* Player Controls with integrated Scrub Bar */}
       <div
@@ -5475,6 +5473,7 @@ export const Preview: React.FC = () => {
               {rendererType.toUpperCase()}
             </span>
           )}
+          <ToolsRail activeTool={activeTool} onToolChange={setActiveTool} />
         </div>
 
         <div className="flex items-center gap-6">

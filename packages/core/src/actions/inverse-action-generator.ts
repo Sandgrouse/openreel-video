@@ -153,7 +153,7 @@ export class InverseActionGenerator {
       case "track/add":
         // To undo add, we need to remove the track that was added
         return this.createInverseAction(action, "track/remove", {
-          trackId: "__LAST_ADDED__", // Special marker to be resolved
+          trackId: `track-${action.id}`,
         });
 
       case "track/remove": {
@@ -243,7 +243,7 @@ export class InverseActionGenerator {
     switch (action.type) {
       case "clip/add":
         return this.createInverseAction(action, "clip/remove", {
-          clipId: "__LAST_ADDED__",
+          clipId: `clip-${action.id}`,
         });
 
       case "clip/remove": {

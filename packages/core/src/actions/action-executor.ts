@@ -351,8 +351,9 @@ export class ActionExecutor {
           timeline.tracks.filter(
             (t: MutableTrack) => t.type === params.trackType,
           ).length + 1;
+        const actionId = (action as Action).id;
         const newTrack: MutableTrack = {
-          id: `track-${Date.now()}`,
+          id: `track-${actionId}`,
           type: params.trackType as Track["type"],
           name: `${trackNames[params.trackType] || params.trackType} ${trackCount}`,
           clips: [],
@@ -457,6 +458,9 @@ export class ActionExecutor {
           mediaId: string;
           startTime: number;
           duration?: number;
+          parentClipId?: string;
+          linkedClipId?: string;
+          linkRole?: "video-parent" | "audio-child";
         };
         const track = timeline.tracks.find(
           (t: MutableTrack) => t.id === params.trackId,
@@ -473,9 +477,12 @@ export class ActionExecutor {
               ? mediaItem.metadata.duration
               : 5);
           const newClip = {
-            id: `clip-${Date.now()}`,
+            id: `clip-${(action as Action).id}`,
             mediaId: params.mediaId,
             trackId: params.trackId,
+            parentClipId: params.parentClipId,
+            linkedClipId: params.linkedClipId,
+            linkRole: params.linkRole,
             startTime: params.startTime,
             duration: clipDuration,
             inPoint: 0,
@@ -593,7 +600,7 @@ export class ActionExecutor {
 
           const clip2 = {
             ...clip,
-            id: `clip-${Date.now()}`,
+            id: `clip-${(action as Action).id}`,
             startTime: splitTime,
             duration: clip.duration - splitOffset,
             inPoint: clip.inPoint + splitOffset,

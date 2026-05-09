@@ -355,6 +355,57 @@ describe("ProjectStore", () => {
     });
   });
 
+  describe("linked video audio", () => {
+    it("should add a linked audio child clip when adding video media with audio", async () => {
+      const currentProject = useProjectStore.getState().project;
+      const videoMedia: MediaItem = {
+        id: "video-with-audio",
+        name: "video-with-audio.mp4",
+        type: "video",
+        fileHandle: null,
+        blob: null,
+        metadata: {
+          duration: 12,
+          width: 1920,
+          height: 1080,
+          frameRate: 30,
+          codec: "h264",
+          sampleRate: 48000,
+          channels: 2,
+          fileSize: 1024,
+        },
+        thumbnailUrl: null,
+        waveformData: new Float32Array([0, 0.5, 1, 0.25]),
+      };
+
+      useProjectStore.getState().loadProject({
+        ...currentProject,
+        mediaLibrary: { items: [videoMedia] },
+      });
+
+      const result = await useProjectStore
+        .getState()
+        .addClipToNewTrack(videoMedia.id, 3);
+
+      expect(result.success).toBe(true);
+
+      const project = useProjectStore.getState().project;
+      const videoTrack = project.timeline.tracks.find((track) => track.type === "video");
+      const audioTrack = project.timeline.tracks.find((track) => track.type === "audio");
+      const videoClip = videoTrack?.clips[0];
+      const audioClip = audioTrack?.clips[0];
+
+      expect(videoClip).toBeDefined();
+      expect(audioClip).toBeDefined();
+      expect(audioClip?.mediaId).toBe(videoMedia.id);
+      expect(audioClip?.startTime).toBe(videoClip?.startTime);
+      expect(audioClip?.duration).toBe(videoClip?.duration);
+      expect(audioClip?.parentClipId).toBe(videoClip?.id);
+      expect(audioClip?.linkedClipId).toBe(videoClip?.id);
+      expect(audioClip?.linkRole).toBe("audio-child");
+    });
+  });
+
   describe("media operations", () => {
     it("should get media item by id", () => {
       const projectWithMedia: Project = {
@@ -540,6 +591,37 @@ describe("ProjectStore", () => {
     it("should be able to undo after an action", async () => {
       await useProjectStore.getState().addTrack("video");
       expect(useProjectStore.getState().canUndo()).toBe(true);
+    });
+
+    it("should undo and redo multiple timeline actions in order", async () => {
+      const store = useProjectStore.getState();
+
+      await store.addTrack("video");
+      await store.addTrack("audio");
+      expect(useProjectStore.getState().project.timeline.tracks).toHaveLength(2);
+
+      await useProjectStore.getState().undo();
+      expect(useProjectStore.getState().project.timeline.tracks).toHaveLength(1);
+
+      await useProjectStore.getState().undo();
+      expect(useProjectStore.getState().project.timeline.tracks).toHaveLength(0);
+
+      await useProjectStore.getState().redo();
+      expect(useProjectStore.getState().project.timeline.tracks).toHaveLength(1);
+
+      await useProjectStore.getState().redo();
+      expect(useProjectStore.getState().project.timeline.tracks).toHaveLength(2);
+    });
+
+    it("should clear redo history after a new action", async () => {
+      const store = useProjectStore.getState();
+
+      await store.addTrack("video");
+      await useProjectStore.getState().undo();
+      expect(useProjectStore.getState().canRedo()).toBe(true);
+
+      await useProjectStore.getState().addTrack("audio");
+      expect(useProjectStore.getState().canRedo()).toBe(false);
     });
   });
 
