@@ -97,7 +97,15 @@ export type TrackAction =
 export type ClipAction =
   | {
       type: "clip/add";
-      params: { trackId: string; mediaId: string; startTime: number };
+      params: {
+        trackId: string;
+        mediaId: string;
+        startTime: number;
+        duration?: number;
+        parentClipId?: string;
+        linkedClipId?: string;
+        linkRole?: "video-parent" | "audio-child";
+      };
     }
   | { type: "clip/remove"; params: { clipId: string } }
   | {

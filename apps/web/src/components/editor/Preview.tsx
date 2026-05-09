@@ -18,6 +18,8 @@ import {
   Move,
   Loader2,
   ZoomIn,
+  Minus,
+  Plus,
 } from "lucide-react";
 import { IconButton } from "@openreel/ui";
 import { useProjectStore } from "../../stores/project-store";
@@ -66,8 +68,14 @@ import {
   MotionPathOverlay,
   ParticleRenderer,
 } from "./preview/index";
+import { EditorStage } from "./preview/EditorStage";
+import { ToolsRail, type CanvasTool } from "./ToolsRail";
 import { ProcessingOverlay } from "./ProcessingOverlay";
+import { toast } from "../../stores/notification-store";
 import type { MotionPathConfig, GSAPMotionPathPoint } from "@openreel/core";
+
+/** Preset zoom levels for the stage zoom dropdown (in fraction, 1 = 100%). */
+const STAGE_ZOOM_PRESETS = [0.25, 0.5, 1, 1.5, 2] as const;
 
 const getAdaptivePoolSize = (width: number, height: number): number => {
   const pixels = width * height;
@@ -220,12 +228,15 @@ export const Preview: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
 
-  const ZOOM_OPTIONS = [
-    { label: "100%", value: 1 },
-    { label: "125%", value: 1.25 },
-    { label: "150%", value: 1.5 },
-    { label: "200%", value: 2 },
-  ];
+  // Stage zoom/pan (Ctrl+wheel zoom, Space+drag pan)
+  const [stageZoom, setStageZoom] = useState(1);
+  const [stagePan, setStagePan] = useState({ x: 0, y: 0 });
+  const spaceHeldRef = useRef(false);
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{ mouseX: number; mouseY: number; panX: number; panY: number } | null>(null);
+
+  // Active canvas tool (Move / Scale / Rotate / Crop / Text)
+  const [activeTool, setActiveTool] = useState<CanvasTool>("move");
 
   const isDark = useThemeStore((state) => state.isDark);
 
@@ -233,7 +244,7 @@ export const Preview: React.FC = () => {
   const [interactionMode, setInteractionMode] =
     useState<InteractionMode>("none");
   const [activeHandle, setActiveHandle] = useState<HandlePosition | null>(null);
-  const [lockAspectRatio, setLockAspectRatio] = useState(true);
+  const [lockAspectRatio, setLockAspectRatio] = useState(false);
   const interactionStartRef = useRef<{
     x: number;
     y: number;
@@ -342,6 +353,8 @@ export const Preview: React.FC = () => {
   const updateShapeTransform = useProjectStore(
     (state) => state.updateShapeTransform,
   );
+  const importMedia = useProjectStore((state) => state.importMedia);
+  const addClipToNewTrack = useProjectStore((state) => state.addClipToNewTrack);
   const timelineTracks = project.timeline.tracks;
   const settings = project.settings;
 
@@ -372,6 +385,8 @@ export const Preview: React.FC = () => {
   const isScrubbingRef = useRef(false);
 
   const selectedItems = useUIStore((state) => state.selectedItems);
+  const selectItem = useUIStore((state) => state.select);
+  const clearSelection = useUIStore((state) => state.clearSelection);
   const cropMode = useUIStore((state) => state.cropMode);
   const cropClipId = useUIStore((state) => state.cropClipId);
   const setCropMode = useUIStore((state) => state.setCropMode);
@@ -3639,6 +3654,30 @@ export const Preview: React.FC = () => {
     return null;
   }, [selectedClipId, timelineTracks]);
 
+  /** All video/image clips visible at the current playhead position — used by EditorStage */
+  const visibleVideoClips = useMemo(() => {
+    const result: Array<(typeof timelineTracks)[0]["clips"][0] & { trackId: string; mediaWidth: number; mediaHeight: number }> = [];
+    for (const track of timelineTracks) {
+      if (track.type !== "video" && track.type !== "image") continue;
+      if (track.hidden) continue;
+      for (const clip of track.clips) {
+        if (
+          playheadPosition >= clip.startTime &&
+          playheadPosition < clip.startTime + clip.duration
+        ) {
+          const media = getMediaItem(clip.mediaId);
+          result.push({
+            ...clip,
+            trackId: track.id,
+            mediaWidth: media?.metadata.width ?? 0,
+            mediaHeight: media?.metadata.height ?? 0,
+          });
+        }
+      }
+    }
+    return result;
+  }, [timelineTracks, playheadPosition, getMediaItem]);
+
   const clipAtPlayhead = useMemo(() => {
     const videoTracks = timelineTracks.filter(
       (t) => (t.type === "video" || t.type === "image") && !t.hidden,
@@ -4503,6 +4542,286 @@ export const Preview: React.FC = () => {
     setCropMode(false);
   }, [setCropMode]);
 
+  // ---------- Stage Zoom / Pan Handlers ----------
+
+  /** Ctrl/Cmd + wheel → zoom stage around cursor */
+  const handleStageAreaWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setStageZoom((prev) => {
+        const next = Math.max(0.1, Math.min(8, prev * delta));
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** Fit the stage so the project frame fills the available area */
+  const handleFitToView = useCallback(() => {
+    setStageZoom(1);
+    setStagePan({ x: 0, y: 0 });
+  }, []);
+
+  /** Space + mousedown → start panning */
+  const handleStageAreaMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (spaceHeldRef.current && e.button === 0) {
+        isPanningRef.current = true;
+        panStartRef.current = {
+          mouseX: e.clientX,
+          mouseY: e.clientY,
+          panX: stagePan.x,
+          panY: stagePan.y,
+        };
+        e.preventDefault();
+      }
+    },
+    [stagePan],
+  );
+
+  /** Middle-mouse button → start panning */
+  const handleStageAreaMiddleDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button === 1) {
+        isPanningRef.current = true;
+        panStartRef.current = {
+          mouseX: e.clientX,
+          mouseY: e.clientY,
+          panX: stagePan.x,
+          panY: stagePan.y,
+        };
+        e.preventDefault();
+      }
+    },
+    [stagePan],
+  );
+
+  const handleStageAreaMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isPanningRef.current || !panStartRef.current) return;
+      const dx = e.clientX - panStartRef.current.mouseX;
+      const dy = e.clientY - panStartRef.current.mouseY;
+      setStagePan({
+        x: panStartRef.current.panX + dx,
+        y: panStartRef.current.panY + dy,
+      });
+    },
+    [],
+  );
+
+  const handleStageAreaMouseUp = useCallback(() => {
+    isPanningRef.current = false;
+    panStartRef.current = null;
+  }, []);
+
+  /** Global keydown to track Space for panning, and V/E/R/C/T shortcuts. */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Skip shortcuts when typing in an input
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
+
+      if (e.code === "Space") {
+        spaceHeldRef.current = true;
+        e.preventDefault();
+      }
+
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        switch (e.key.toLowerCase()) {
+          case "v":
+            setActiveTool("move");
+            e.preventDefault();
+            break;
+          case "e":
+            setActiveTool("scale");
+            e.preventDefault();
+            break;
+          case "r":
+            setActiveTool("rotate");
+            e.preventDefault();
+            break;
+          case "c":
+            setActiveTool("crop");
+            toast.info("Crop tool — coming soon!");
+            e.preventDefault();
+            break;
+          case "t":
+            setActiveTool("text");
+            toast.info("Text tool — coming soon!");
+            e.preventDefault();
+            break;
+        }
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        spaceHeldRef.current = false;
+        isPanningRef.current = false;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  // ---------- Konva EditorStage Callbacks ----------
+
+  /** Called when user clicks a clip on the Konva stage */
+  const handleKonvaSelectClip = useCallback(
+    (clipId: string) => {
+      selectItem({ type: "clip", id: clipId });
+    },
+    [selectItem],
+  );
+
+  /** Called when user clicks empty stage area */
+  const handleKonvaDeselectAll = useCallback(() => {
+    clearSelection();
+  }, [clearSelection]);
+
+  /** Live position update during Konva drag (called every frame) */
+  const handleKonvaDragMove = useCallback(
+    (clipId: string, x: number, y: number) => {
+      updateClipTransform(clipId, { position: { x, y } });
+    },
+    [updateClipTransform],
+  );
+
+  /** Commit final position on drag end */
+  const handleKonvaDragEnd = useCallback(
+    (clipId: string, x: number, y: number) => {
+      updateClipTransform(clipId, { position: { x, y } });
+    },
+    [updateClipTransform],
+  );
+
+  /** Live transform (scale / rotation / position) update during Konva transform */
+  const handleKonvaTransform = useCallback(
+    (clipId: string, scaleX: number, scaleY: number, rotation: number, x: number, y: number) => {
+      updateClipTransform(clipId, {
+        scale: { x: scaleX, y: scaleY },
+        rotation,
+        position: { x, y },
+      });
+    },
+    [updateClipTransform],
+  );
+
+  /** Commit final transform on transform end */
+  const handleKonvaTransformEnd = useCallback(
+    (clipId: string, scaleX: number, scaleY: number, rotation: number, x: number, y: number) => {
+      updateClipTransform(clipId, {
+        scale: { x: scaleX, y: scaleY },
+        rotation,
+        position: { x, y },
+      });
+    },
+    [updateClipTransform],
+  );
+
+  // ---------- Drag-and-Drop media onto canvas ----------
+
+  const handleCanvasDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      // Accept file drops (video/image) — allow if files are being dragged
+      if (e.dataTransfer.types.includes("Files")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    },
+    [],
+  );
+
+  const handleCanvasDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files).filter((f) =>
+        f.type.startsWith("video/") || f.type.startsWith("image/"),
+      );
+      if (files.length === 0) return;
+
+      // Calculate drop position in project coordinates (centered at drop point)
+      const overlayEl = overlayRef.current;
+      if (!overlayEl) return;
+      const rect = overlayEl.getBoundingClientRect();
+      const relX = e.clientX - rect.left;
+      const relY = e.clientY - rect.top;
+
+      // Convert display position to project coordinates
+      const canvasAspect = settings.width / settings.height;
+      const elemAspect = rect.width / rect.height;
+      let actualW: number;
+      let actualH: number;
+      let offsetX = 0;
+      let offsetY = 0;
+      if (elemAspect > canvasAspect) {
+        actualH = rect.height;
+        actualW = actualH * canvasAspect;
+        offsetX = (rect.width - actualW) / 2;
+      } else {
+        actualW = rect.width;
+        actualH = actualW / canvasAspect;
+        offsetY = (rect.height - actualH) / 2;
+      }
+      const displayScale = actualW / settings.width;
+      const projectX = (relX - offsetX - actualW / 2) / displayScale;
+      const projectY = (relY - offsetY - actualH / 2) / displayScale;
+
+      for (const file of files) {
+        try {
+          const result = await importMedia(file);
+          if (result.success && result.actionId) {
+            const mediaId = result.actionId;
+            // Snapshot existing clips before adding the new one.
+            // Using getState() directly (outside React renders) is intentional here —
+            // we need a synchronous snapshot immediately before the async addClipToNewTrack call
+            // so we can identify the newly created clip by diffing clip IDs.
+            const prevClipIds = new Set(
+              useProjectStore.getState().project.timeline.tracks
+                .flatMap((t) => t.clips)
+                .map((c) => c.id),
+            );
+            const clipResult = await addClipToNewTrack(mediaId, playheadPosition);
+            if (clipResult.success) {
+              // Find the newly added clip by comparing with snapshot
+              const newClip = useProjectStore.getState().project.timeline.tracks
+                .flatMap((t) => t.clips)
+                .find((c) => !prevClipIds.has(c.id));
+              if (newClip) {
+                updateClipTransform(newClip.id, {
+                  position: { x: projectX, y: projectY },
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("[Preview] Drop import failed:", err);
+          toast.error("Failed to import dropped file");
+        }
+      }
+    },
+    [
+      importMedia,
+      addClipToNewTrack,
+      updateClipTransform,
+      settings.width,
+      settings.height,
+      playheadPosition,
+    ],
+  );
+
   useEffect(() => {
     if (interactionMode !== "none") {
       const handleGlobalMouseUp = () => {
@@ -4542,6 +4861,7 @@ export const Preview: React.FC = () => {
 
   const handleScrubClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      e.stopPropagation();
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const percentage = Math.max(0, Math.min(1, x / rect.width));
@@ -4603,7 +4923,9 @@ export const Preview: React.FC = () => {
   const progressPercentage =
     actualEndTime > 0 ? (playheadPosition / actualEndTime) * 100 : 0;
 
-  const showResizeHandles = !isPlaying && selectedClip && clipBounds;
+  // Konva EditorStage handles video clip selection handles — hide the old HTML overlay for video clips
+  const konvaStageActive = canvasSize.width > 0 && canvasSize.height > 0 && !isPlaying;
+  const showResizeHandles = !isPlaying && selectedClip && clipBounds && !konvaStageActive;
 
   const showTextClipHandles = !isPlaying && selectedTextClip && textClipBounds;
 
@@ -4670,14 +4992,30 @@ export const Preview: React.FC = () => {
         />
       )}
 
-      {/* Video Area */}
-      <div
-        className={`flex-1 relative flex items-center justify-center bg-background-secondary/30 transition-all duration-300 ${
-          isMaximized || isFullscreen ? "p-0" : "p-4"
-        } ${zoomLevel > 1 ? "overflow-auto" : ""}`}
-        onMouseMove={interactionMode !== "none" ? handleMouseMove : undefined}
-        onMouseUp={handleMouseUp}
-      >
+      {/* Main workspace row */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Video Area */}
+        <div
+          className={`flex-1 relative flex items-center justify-center bg-background-secondary/30 transition-all duration-300 ${
+            isMaximized || isFullscreen ? "p-0" : "p-4"
+          } ${zoomLevel > 1 ? "overflow-auto" : ""}`}
+          onMouseMove={(e) => {
+            handleStageAreaMouseMove(e);
+            if (interactionMode !== "none") handleMouseMove(e);
+          }}
+          onMouseUp={(_e) => {
+            handleStageAreaMouseUp();
+            handleMouseUp();
+          }}
+          onMouseDown={(e) => {
+            handleStageAreaMouseDown(e);
+            handleStageAreaMiddleDown(e);
+          }}
+          onWheel={handleStageAreaWheel}
+          onDragOver={handleCanvasDragOver}
+          onDrop={handleCanvasDrop}
+          style={{ cursor: spaceHeldRef.current ? "grab" : undefined }}
+        >
         <div
           ref={overlayRef}
           className={`relative bg-black overflow-hidden transition-all duration-300 ${
@@ -4691,11 +5029,19 @@ export const Preview: React.FC = () => {
                   width: "100%",
                   height: "100%",
                   maxWidth: "none",
+                  // Divide pan by zoom so the visual pan distance stays constant
+                  // regardless of the current zoom level (CSS scale coordinate system).
+                  transform: `scale(${stageZoom}) translate(${stagePan.x / stageZoom}px, ${stagePan.y / stageZoom}px)`,
+                  transformOrigin: "center center",
                 }
               : {
                   height: `${450 * zoomLevel}px`,
                   width: `calc(${450 * zoomLevel}px * ${settings.width} / ${settings.height})`,
                   maxWidth: `${800 * zoomLevel}px`,
+                  // Divide pan by zoom so the visual pan distance stays constant
+                  // regardless of the current zoom level (CSS scale coordinate system).
+                  transform: `scale(${stageZoom}) translate(${stagePan.x / stageZoom}px, ${stagePan.y / stageZoom}px)`,
+                  transformOrigin: "center center",
                 }
           }
         >
@@ -4704,6 +5050,7 @@ export const Preview: React.FC = () => {
             width={settings.width}
             height={settings.height}
             className="w-full h-full object-contain bg-black"
+            onContextMenu={(e) => e.preventDefault()}
             style={{
               cursor: "default",
             }}
@@ -4711,6 +5058,27 @@ export const Preview: React.FC = () => {
 
           {/* Processing Overlay */}
           <ProcessingOverlay />
+
+          {/* Konva interactive overlay — click-to-select, drag, resize, rotate handles */}
+          {canvasSize.width > 0 && canvasSize.height > 0 && !isPlaying && (
+            <div className="absolute inset-0 z-10">
+              <EditorStage
+                stageWidth={canvasSize.width}
+                stageHeight={canvasSize.height}
+                canvasWidth={settings.width}
+                canvasHeight={settings.height}
+                visibleClips={visibleVideoClips}
+                selectedClipId={selectedClipId}
+                onSelectClip={handleKonvaSelectClip}
+                onDeselectAll={handleKonvaDeselectAll}
+                onClipDragMove={handleKonvaDragMove}
+                onClipDragEnd={handleKonvaDragEnd}
+                onClipTransform={handleKonvaTransform}
+                onClipTransformEnd={handleKonvaTransformEnd}
+                keepRatio={lockAspectRatio}
+              />
+            </div>
+          )}
 
           {/* Motion Path Overlay */}
           {motionPathMode && motionPathConfig && motionPathClip && (
@@ -5032,7 +5400,38 @@ export const Preview: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Zoom HUD — bottom-right corner of the video area */}
+        <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1 bg-background-secondary/80 backdrop-blur-sm border border-border rounded-lg px-2 py-1 text-[10px]">
+          <button
+            onClick={() => setStageZoom((z) => Math.max(0.1, z * 0.8))}
+            className="w-5 h-5 flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
+            title="Zoom out (Ctrl/Cmd + scroll)"
+          >
+            <Minus size={10} />
+          </button>
+          <span className="font-mono text-text-secondary w-10 text-center">
+            {Math.round(stageZoom * 100)}%
+          </span>
+          <button
+            onClick={() => setStageZoom((z) => Math.min(8, z * 1.25))}
+            className="w-5 h-5 flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
+            title="Zoom in (Ctrl/Cmd + scroll)"
+          >
+            <Plus size={10} />
+          </button>
+          <div className="w-px h-3 bg-border mx-1" />
+          <button
+            onClick={handleFitToView}
+            className="text-text-secondary hover:text-text-primary transition-colors px-1"
+            title="Fit to view"
+          >
+            Fit
+          </button>
+        </div>
       </div>
+
+      </div>{/* end flex-1 flex row */}
 
       {/* Player Controls with integrated Scrub Bar */}
       <div
@@ -5074,6 +5473,7 @@ export const Preview: React.FC = () => {
               {rendererType.toUpperCase()}
             </span>
           )}
+          <ToolsRail activeTool={activeTool} onToolChange={setActiveTool} />
         </div>
 
         <div className="flex items-center gap-6">
@@ -5113,16 +5513,16 @@ export const Preview: React.FC = () => {
             {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
 
-          {/* Zoom Control */}
+          {/* Stage Zoom Control (shows stageZoom, consistent with HUD) */}
           <div className="relative">
             <button
               onClick={() => setShowZoomMenu(!showZoomMenu)}
               className="px-2 py-1 rounded-lg text-xs font-mono text-text-secondary hover:text-text-primary hover:bg-background-elevated transition-colors"
-              title="Preview Zoom"
+              title="Preview Zoom (or Ctrl+scroll on canvas)"
             >
               <div className="flex items-center gap-1">
                 <ZoomIn size={14} />
-                <span>{Math.round(zoomLevel * 100)}%</span>
+                <span>{Math.round(stageZoom * 100)}%</span>
               </div>
             </button>
             {showZoomMenu && (
@@ -5132,20 +5532,26 @@ export const Preview: React.FC = () => {
                   onClick={() => setShowZoomMenu(false)}
                 />
                 <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-background-elevated border border-border rounded-lg shadow-xl py-1 z-50 min-w-[80px]">
-                  {ZOOM_OPTIONS.map((opt) => (
+                  <button
+                    key="fit"
+                    onClick={() => {
+                      handleFitToView();
+                      setShowZoomMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-mono text-left hover:bg-background-secondary transition-colors text-text-secondary"
+                  >
+                    Fit
+                  </button>
+                  {STAGE_ZOOM_PRESETS.map((level) => (
                     <button
-                      key={opt.value}
+                      key={level}
                       onClick={() => {
-                        setZoomLevel(opt.value);
+                        setStageZoom(level);
                         setShowZoomMenu(false);
                       }}
-                      className={`w-full px-3 py-1.5 text-xs font-mono text-left hover:bg-background-secondary transition-colors ${
-                        zoomLevel === opt.value
-                          ? "text-primary"
-                          : "text-text-secondary"
-                      }`}
+                      className="w-full px-3 py-1.5 text-xs font-mono text-left hover:bg-background-secondary transition-colors text-text-secondary"
                     >
-                      {opt.label}
+                      {Math.round(level * 100)}%
                     </button>
                   ))}
                 </div>

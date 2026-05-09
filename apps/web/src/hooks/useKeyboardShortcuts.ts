@@ -16,6 +16,13 @@ export function useKeyboardShortcuts() {
     splitClip,
     removeClip,
     rippleDeleteClip,
+    deleteTextClip,
+    deleteShapeClip,
+    deleteSVGClip,
+    deleteStickerClip,
+    getShapeClip,
+    getSVGClip,
+    getStickerClip,
     copyClips,
     pasteClips,
     duplicateClip,
@@ -24,7 +31,13 @@ export function useKeyboardShortcuts() {
     addMarker,
   } = useProjectStore();
 
-  const { getSelectedClipIds, clearSelection, toggleSnap, select } =
+  const {
+    getSelectedClipIds,
+    clearSelection,
+    toggleSnap,
+    selectMultiple,
+    selectedItems,
+  } =
     useUIStore();
   const {
     togglePlayback,
@@ -159,9 +172,38 @@ export function useKeyboardShortcuts() {
 
   const handleDelete = useCallback(() => {
     const selectedIds = getSelectedClipIds();
-    selectedIds.forEach((id) => removeClip(id));
+    selectedIds.forEach((id) => {
+      const selectedItem = selectedItems.find((item) => item.id === id);
+      if (selectedItem?.type === "text-clip") {
+        deleteTextClip(id);
+        return;
+      }
+      if (selectedItem?.type === "shape-clip") {
+        if (getStickerClip(id)) {
+          deleteStickerClip(id);
+        } else if (getSVGClip(id)) {
+          deleteSVGClip(id);
+        } else if (getShapeClip(id)) {
+          deleteShapeClip(id);
+        }
+        return;
+      }
+      removeClip(id);
+    });
     clearSelection();
-  }, [getSelectedClipIds, removeClip, clearSelection]);
+  }, [
+    getSelectedClipIds,
+    selectedItems,
+    deleteTextClip,
+    deleteStickerClip,
+    deleteSVGClip,
+    deleteShapeClip,
+    getStickerClip,
+    getSVGClip,
+    getShapeClip,
+    removeClip,
+    clearSelection,
+  ]);
 
   const handleRippleDelete = useCallback(() => {
     const selectedIds = getSelectedClipIds();
@@ -205,12 +247,14 @@ export function useKeyboardShortcuts() {
   }, [getSelectedClipIds, playheadPosition]);
 
   const handleSelectAll = useCallback(() => {
+    const items: Array<{ id: string; type: "clip"; trackId: string }> = [];
     for (const track of project.timeline.tracks) {
       for (const clip of track.clips) {
-        select({ id: clip.id, type: "clip" });
+        items.push({ id: clip.id, type: "clip", trackId: track.id });
       }
     }
-  }, [select, project.timeline.tracks]);
+    selectMultiple(items);
+  }, [selectMultiple, project.timeline.tracks]);
 
   const handleDeselect = useCallback(() => {
     clearSelection();

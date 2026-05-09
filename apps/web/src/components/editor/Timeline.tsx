@@ -53,6 +53,16 @@ import {
   getTrackInfo,
 } from "./timeline/index";
 
+const formatTimelineZoom = (pixelsPerSecond: number): string => {
+  if (pixelsPerSecond < 1) {
+    return `${pixelsPerSecond.toFixed(2)}px/s`;
+  }
+  if (pixelsPerSecond < 10) {
+    return `${pixelsPerSecond.toFixed(1)}px/s`;
+  }
+  return `${Math.round(pixelsPerSecond)}px/s`;
+};
+
 export const Timeline: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
@@ -69,6 +79,7 @@ export const Timeline: React.FC = () => {
     reorderTrack,
     deleteShapeClip,
     deleteSVGClip,
+    deleteStickerClip,
     deleteTextClip,
     removeMarker,
     updateMarker,
@@ -100,9 +111,18 @@ export const Timeline: React.FC = () => {
 
   const [showLayersPanel, setShowLayersPanel] = useState(false);
 
-  const { select, selectMultiple, clearSelection, getSelectedClipIds, snapSettings, toggleSnap } =
-    useUIStore();
+  const {
+    select,
+    selectMultiple,
+    clearSelection,
+    getSelectedClipIds,
+    snapSettings,
+    toggleSnap,
+    panels,
+    setPanelMaximized,
+  } = useUIStore();
   const selectedClipIds = getSelectedClipIds();
+  const timelineMaximized = panels.timeline?.maximized ?? false;
 
   const { getTitleEngine, getGraphicsEngine } = useEngineStore();
   const titleEngine = getTitleEngine();
@@ -335,7 +355,9 @@ export const Timeline: React.FC = () => {
 
       const graphicClip = allShapeClips.find((gc) => gc.id === id);
       if (graphicClip) {
-        if (graphicClip.type === "svg") {
+        if (graphicClip.type === "sticker" || graphicClip.type === "emoji") {
+          deleteStickerClip(id);
+        } else if (graphicClip.type === "svg") {
           deleteSVGClip(id);
         } else {
           deleteShapeClip(id);
@@ -353,13 +375,10 @@ export const Timeline: React.FC = () => {
     allTextClips,
     allShapeClips,
     deleteTextClip,
+    deleteStickerClip,
     deleteShapeClip,
     deleteSVGClip,
   ]);
-
-  const handleBackgroundClick = useCallback(() => {
-    clearSelection();
-  }, [clearSelection]);
 
   const handleBoxSelectionStart = useCallback(
     (e: React.MouseEvent) => {
@@ -900,8 +919,8 @@ export const Timeline: React.FC = () => {
             >
               <span className="text-base font-medium">−</span>
             </button>
-            <span className="text-[11px] w-14 text-center font-mono text-text-secondary tabular-nums">
-              {Math.round(pixelsPerSecond)}px/s
+            <span className="text-[11px] w-16 text-center font-mono text-text-secondary tabular-nums">
+              {formatTimelineZoom(pixelsPerSecond)}
             </span>
             <button
               onClick={zoomIn}
@@ -911,14 +930,17 @@ export const Timeline: React.FC = () => {
               <span className="text-base font-medium">+</span>
             </button>
           </div>
-          <IconButton icon={Maximize2} title="Maximize timeline" />
+          <IconButton
+            icon={Maximize2}
+            onClick={() => setPanelMaximized("timeline", !timelineMaximized)}
+            title={timelineMaximized ? "Restore timeline" : "Maximize timeline"}
+          />
         </div>
       </div>
 
       <div
         ref={containerRef}
         className="flex-1 flex flex-col overflow-hidden relative"
-        onClick={handleBackgroundClick}
       >
         <div className="flex shrink-0">
           <div className="w-32 h-8 bg-background-tertiary border-b border-r border-border shrink-0" />
@@ -990,6 +1012,12 @@ export const Timeline: React.FC = () => {
             }}
             onMouseDown={handleBoxSelectionStart}
             onMouseMove={handleBoxSelectionMove}
+            onClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest(".clip-component")) return;
+              if (target.closest("button,[role='button'],[role='menuitem']")) return;
+              clearSelection();
+            }}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = "copy";

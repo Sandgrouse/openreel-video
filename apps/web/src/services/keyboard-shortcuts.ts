@@ -524,8 +524,18 @@ class KeyboardShortcutsManager {
 
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (
+      e.defaultPrevented ||
       e.target instanceof HTMLInputElement ||
-      e.target instanceof HTMLTextAreaElement
+      e.target instanceof HTMLTextAreaElement ||
+      e.target instanceof HTMLSelectElement
+    ) {
+      return;
+    }
+
+    const target = e.target instanceof Element ? e.target : null;
+    if (
+      (target instanceof HTMLElement && target.isContentEditable) ||
+      target?.closest("[contenteditable='true'],[role='textbox'],[role='dialog']")
     ) {
       return;
     }
@@ -545,8 +555,14 @@ class KeyboardShortcutsManager {
       if (!shortcut.enabled) continue;
 
       const combo = parseKeyCombo(shortcut.currentKey);
+      const eventKey = e.key.toLowerCase();
+      const eventCode = e.code.toLowerCase();
       const keyMatches =
-        e.key.toLowerCase() === combo.key || e.code.toLowerCase() === combo.key;
+        eventKey === combo.key ||
+        eventCode === combo.key ||
+        (shortcut.id === "editing.delete" &&
+          combo.key === "delete" &&
+          (eventKey === "backspace" || eventCode === "backspace"));
       const metaMatches = (combo.meta || combo.ctrl) === isMeta;
       const shiftMatches = combo.shift === e.shiftKey;
       const altMatches = combo.alt === e.altKey;

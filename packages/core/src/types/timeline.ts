@@ -40,6 +40,9 @@ export interface Clip {
   readonly id: string;
   readonly mediaId: string;
   readonly trackId: string;
+  readonly parentClipId?: string;
+  readonly linkedClipId?: string;
+  readonly linkRole?: "video-parent" | "audio-child";
   readonly startTime: number;
   readonly duration: number;
   readonly inPoint: number;

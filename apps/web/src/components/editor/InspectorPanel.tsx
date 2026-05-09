@@ -1,5 +1,14 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ChevronDown, Zap, Captions, Loader2 } from "lucide-react";
+import {
+  ChevronDown,
+  Zap,
+  Captions,
+  Loader2,
+  Link,
+  Link2Off,
+  Maximize2,
+  X,
+} from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
@@ -54,6 +63,7 @@ import {
   DEFAULT_EQ_BANDS,
 } from "../../bridges/audio-bridge-effects";
 import {
+  IconButton,
   Input,
   LabeledSlider,
   Switch,
@@ -183,10 +193,15 @@ export const InspectorPanel: React.FC = () => {
     useProjectStore();
   const project = useProjectStore((state) => state.project);
   const { getSelectedClipIds } = useUIStore();
+  const { panels, setPanelVisible, setPanelMaximized } = useUIStore();
   const selectedItems = useUIStore((state) => state.selectedItems);
   const selectedClipIds = getSelectedClipIds();
+  const isPanelMaximized = panels.inspector?.maximized ?? false;
   const getTitleEngine = useEngineStore((state) => state.getTitleEngine);
   const getGraphicsEngine = useEngineStore((state) => state.getGraphicsEngine);
+
+  /** Whether Scale X and Scale Y are linked for uniform scaling */
+  const [lockScale, setLockScale] = useState(true);
 
   // Transcription state
   const [transcriptionProgress, setTranscriptionProgress] =
@@ -603,12 +618,29 @@ export const InspectorPanel: React.FC = () => {
   return (
     <div
       data-tour="inspector"
-      className="w-80 bg-background-secondary border-l border-border flex flex-col overflow-y-auto h-full custom-scrollbar"
+      className="bg-background-secondary border-l border-border flex flex-col overflow-y-auto h-full custom-scrollbar"
     >
       <div className="p-5">
-        <h3 className="text-sm font-bold text-text-primary mb-5 tracking-tight">
-          Inspector
-        </h3>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-text-primary tracking-tight">
+            Inspector
+          </h3>
+          <div className="flex gap-1">
+            <IconButton
+              icon={Maximize2}
+              onClick={() => setPanelMaximized("inspector", !isPanelMaximized)}
+              title={isPanelMaximized ? "Restore panel" : "Maximize panel"}
+            />
+            <IconButton
+              icon={X}
+              onClick={() => {
+                setPanelMaximized("inspector", false);
+                setPanelVisible("inspector", false);
+              }}
+              title="Close panel"
+            />
+          </div>
+        </div>
 
         {selectedClip ? (
           <>
@@ -621,6 +653,150 @@ export const InspectorPanel: React.FC = () => {
                 Duration: {selectedClip.duration.toFixed(2)}s
               </p>
             </div>
+
+            {/* Transform — always first so it's visible without scrolling */}
+            {showTransformControls && (
+              <Section title="Transform" sectionId="transform" defaultOpen={true}>
+                <div className="space-y-3">
+                  <LabeledSlider
+                    label="Position X"
+                    value={transform.position.x}
+                    onChange={(x) =>
+                      handleTransformChange({
+                        position: { ...transform.position, x },
+                      })
+                    }
+                    min={-1920}
+                    max={1920}
+                    step={1}
+                    unit="px"
+                  />
+                  <LabeledSlider
+                    label="Position Y"
+                    value={transform.position.y}
+                    onChange={(y) =>
+                      handleTransformChange({
+                        position: { ...transform.position, y },
+                      })
+                    }
+                    min={-1080}
+                    max={1080}
+                    step={1}
+                    unit="px"
+                  />
+                  <LabeledSlider
+                    label="Scale X"
+                    value={transform.scale.x * 100}
+                    onChange={(x) => {
+                      const newX = x / 100;
+                      handleTransformChange({
+                        scale: lockScale
+                          ? { x: newX, y: newX }
+                          : { ...transform.scale, x: newX },
+                      });
+                    }}
+                    min={0}
+                    max={300}
+                    step={1}
+                    unit="%"
+                  />
+                  {/* Lock / Unlock uniform scale */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-px bg-border" />
+                    <button
+                      onClick={() => setLockScale((v) => !v)}
+                      title={lockScale ? "Unlock proportional scaling" : "Lock proportional scaling"}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] transition-colors ${
+                        lockScale
+                          ? "bg-primary/20 text-primary border border-primary/40"
+                          : "bg-background-tertiary text-text-secondary border border-border hover:bg-background-elevated"
+                      }`}
+                    >
+                      {lockScale ? <Link size={9} /> : <Link2Off size={9} />}
+                      {lockScale ? "Proportional" : "Free"}
+                    </button>
+                    <div className="flex-1 h-px bg-border" />
+                  </div>
+                  <LabeledSlider
+                    label="Scale Y"
+                    value={transform.scale.y * 100}
+                    onChange={(y) => {
+                      const newY = y / 100;
+                      handleTransformChange({
+                        scale: lockScale
+                          ? { x: newY, y: newY }
+                          : { ...transform.scale, y: newY },
+                      });
+                    }}
+                    min={0}
+                    max={300}
+                    step={1}
+                    unit="%"
+                  />
+                  <LabeledSlider
+                    label="Rotation"
+                    value={transform.rotation}
+                    onChange={(rotation) => handleTransformChange({ rotation })}
+                    min={-180}
+                    max={180}
+                    step={1}
+                    unit="°"
+                  />
+                  <LabeledSlider
+                    label="Opacity"
+                    value={transform.opacity * 100}
+                    onChange={(opacity) =>
+                      handleTransformChange({ opacity: opacity / 100 })
+                    }
+                    min={0}
+                    max={100}
+                    step={1}
+                    unit="%"
+                  />
+                  <LabeledSlider
+                    label="Border Radius"
+                    value={transform.borderRadius || 0}
+                    onChange={(borderRadius) =>
+                      handleTransformChange({ borderRadius })
+                    }
+                    min={0}
+                    max={200}
+                    step={1}
+                    unit="px"
+                  />
+                  {clipType === "image" && (
+                    <div className="space-y-1 pt-2 border-t border-border">
+                      <span className="text-[10px] text-text-secondary">
+                        Fit Mode
+                      </span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(
+                          ["contain", "cover", "stretch", "none"] as FitMode[]
+                        ).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() =>
+                              handleTransformChange({ fitMode: mode })
+                            }
+                            className={`py-1.5 rounded text-[9px] capitalize transition-colors ${
+                              (transform.fitMode || "none") === mode
+                                ? "bg-primary text-white"
+                                : "bg-background-tertiary border border-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            {mode === "contain"
+                              ? "Fit"
+                              : mode === "cover"
+                                ? "Fill"
+                                : mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
 
             {clipType === "video" && (
               <Section title="AI Auto-Captions" sectionId="auto-captions" defaultOpen={false}>
@@ -707,127 +883,6 @@ export const InspectorPanel: React.FC = () => {
             {clipType === "audio" && (
               <Section title="Beat Sync" sectionId="beat-sync" defaultOpen={false}>
                 <AudioTextSyncPanel clipId={clipId} />
-              </Section>
-            )}
-
-            {/* Transform */}
-            {showTransformControls && (
-              <Section title="Transform" sectionId="transform">
-                <div className="space-y-3">
-                  <LabeledSlider
-                    label="Position X"
-                    value={transform.position.x}
-                    onChange={(x) =>
-                      handleTransformChange({
-                        position: { ...transform.position, x },
-                      })
-                    }
-                    min={-1920}
-                    max={1920}
-                    step={1}
-                    unit="px"
-                  />
-                  <LabeledSlider
-                    label="Position Y"
-                    value={transform.position.y}
-                    onChange={(y) =>
-                      handleTransformChange({
-                        position: { ...transform.position, y },
-                      })
-                    }
-                    min={-1080}
-                    max={1080}
-                    step={1}
-                    unit="px"
-                  />
-                  <LabeledSlider
-                    label="Scale X"
-                    value={transform.scale.x * 100}
-                    onChange={(x) =>
-                      handleTransformChange({
-                        scale: { ...transform.scale, x: x / 100 },
-                      })
-                    }
-                    min={0}
-                    max={300}
-                    step={1}
-                    unit="%"
-                  />
-                  <LabeledSlider
-                    label="Scale Y"
-                    value={transform.scale.y * 100}
-                    onChange={(y) =>
-                      handleTransformChange({
-                        scale: { ...transform.scale, y: y / 100 },
-                      })
-                    }
-                    min={0}
-                    max={300}
-                    step={1}
-                    unit="%"
-                  />
-                  <LabeledSlider
-                    label="Rotation"
-                    value={transform.rotation}
-                    onChange={(rotation) => handleTransformChange({ rotation })}
-                    min={-180}
-                    max={180}
-                    step={1}
-                    unit="°"
-                  />
-                  <LabeledSlider
-                    label="Opacity"
-                    value={transform.opacity * 100}
-                    onChange={(opacity) =>
-                      handleTransformChange({ opacity: opacity / 100 })
-                    }
-                    min={0}
-                    max={100}
-                    step={1}
-                    unit="%"
-                  />
-                  <LabeledSlider
-                    label="Border Radius"
-                    value={transform.borderRadius || 0}
-                    onChange={(borderRadius) =>
-                      handleTransformChange({ borderRadius })
-                    }
-                    min={0}
-                    max={200}
-                    step={1}
-                    unit="px"
-                  />
-                  {clipType === "image" && (
-                    <div className="space-y-1 pt-2 border-t border-border">
-                      <span className="text-[10px] text-text-secondary">
-                        Fit Mode
-                      </span>
-                      <div className="grid grid-cols-4 gap-1">
-                        {(
-                          ["contain", "cover", "stretch", "none"] as FitMode[]
-                        ).map((mode) => (
-                          <button
-                            key={mode}
-                            onClick={() =>
-                              handleTransformChange({ fitMode: mode })
-                            }
-                            className={`py-1.5 rounded text-[9px] capitalize transition-colors ${
-                              (transform.fitMode || "none") === mode
-                                ? "bg-primary text-white"
-                                : "bg-background-tertiary border border-border text-text-secondary hover:text-text-primary"
-                            }`}
-                          >
-                            {mode === "contain"
-                              ? "Fit"
-                              : mode === "cover"
-                                ? "Fill"
-                                : mode}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
               </Section>
             )}
 

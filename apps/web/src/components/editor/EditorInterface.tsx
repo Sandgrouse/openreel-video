@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 
 import { Toolbar } from "./Toolbar";
 import { AssetsPanel } from "./AssetsPanel";
@@ -9,6 +9,7 @@ import { KeyframeEditorPanel } from "./KeyframeEditorPanel";
 import { AudioMixer } from "../audio-mixer";
 import { KeyboardShortcutsOverlay } from "./KeyboardShortcutsOverlay";
 import { PanelErrorBoundary } from "../ErrorBoundary";
+import { ResizableHandle } from "./ResizableHandle";
 import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -34,6 +35,7 @@ import {
   initializeTransitionBridge,
   disposeTransitionBridge,
 } from "../../bridges/transition-bridge";
+import { PanelLeftOpen, PanelRightOpen } from "lucide-react";
 
 /**
  * Auto-save initialization hook
@@ -172,6 +174,8 @@ export const EditorInterface: React.FC = () => {
     getSelectedClipIds,
     panels,
     setPanelVisible,
+    setPanelWidth,
+    setPanelHeight,
   } = useUIStore();
   const { project, updateClipKeyframes } = useProjectStore();
   const tracks = project.timeline.tracks;
@@ -249,39 +253,24 @@ export const EditorInterface: React.FC = () => {
     []
   );
 
-  const [timelineHeight, setTimelineHeight] = useState(320);
-  const isDraggingRef = useRef(false);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isDraggingRef.current = true;
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current) return;
-
-      const newHeight = window.innerHeight - e.clientY;
-      const maxHeight = window.innerHeight * 0.6;
-      setTimelineHeight(Math.max(200, Math.min(newHeight, maxHeight)));
-    };
-
-    const handleMouseUp = () => {
-      isDraggingRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, []);
+  const mediaPanel = panels.mediaLibrary;
+  const inspectorPanel = panels.inspector;
+  const timelinePanel = panels.timeline;
+  const timelineMaximized = timelinePanel?.maximized ?? false;
+  const mediaVisible =
+    Boolean(mediaPanel?.visible) &&
+    !timelineMaximized &&
+    !inspectorPanel?.maximized;
+  const inspectorVisible =
+    Boolean(inspectorPanel?.visible) &&
+    !timelineMaximized &&
+    !mediaPanel?.maximized;
+  const workspaceVisible = !timelineMaximized;
+  const timelineHeight = timelinePanel?.height ?? 320;
+  const mediaWidth = mediaPanel?.maximized ? 560 : mediaPanel?.width ?? 300;
+  const inspectorWidth = inspectorPanel?.maximized
+    ? 560
+    : inspectorPanel?.width ?? 300;
 
   if (initializing || !initialized) {
     return (
@@ -304,43 +293,99 @@ export const EditorInterface: React.FC = () => {
       <Toolbar />
 
       {/* Workspace Area */}
-      <div className="flex-1 flex overflow-hidden">
-        <PanelErrorBoundary name="Assets Panel">
-          <AssetsPanel />
-        </PanelErrorBoundary>
+      {workspaceVisible && (
+        <div className="flex-1 flex overflow-hidden relative">
+          {!mediaVisible && (
+            <button
+              className="absolute left-3 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-2.5 py-1.5 text-[11px] font-medium text-text-secondary shadow-lg transition-colors hover:bg-background-elevated hover:text-text-primary"
+              onClick={() => setPanelVisible("mediaLibrary", true)}
+              type="button"
+            >
+              <PanelLeftOpen size={14} />
+              Assets
+            </button>
+          )}
 
-        <PanelErrorBoundary name="Preview">
-          <Preview />
-        </PanelErrorBoundary>
+          {mediaVisible && (
+            <>
+              <div
+                className="shrink-0 min-w-0"
+                style={{ width: mediaWidth }}
+              >
+                <PanelErrorBoundary name="Assets Panel">
+                  <AssetsPanel />
+                </PanelErrorBoundary>
+              </div>
+              <ResizableHandle
+                ariaLabel="Resize assets panel"
+                axis="horizontal"
+                onResize={(delta) =>
+                  setPanelWidth("mediaLibrary", mediaWidth + delta)
+                }
+              />
+            </>
+          )}
 
-        <PanelErrorBoundary name="Inspector">
-          <InspectorPanel />
-        </PanelErrorBoundary>
-
-        {keyframeEditorOpen && (
-          <PanelErrorBoundary name="Keyframe Editor">
-            <KeyframeEditorPanel
-              clip={selectedClip}
-              onClose={() => setKeyframeEditorOpen(false)}
-              onUpdateKeyframe={handleUpdateKeyframe}
-              onDeleteKeyframe={handleDeleteKeyframe}
-              onCopyKeyframes={handleCopyKeyframes}
-              onPasteKeyframes={handlePasteKeyframes}
-              selectedKeyframeIds={selectedKeyframeIds}
-              onSelectKeyframe={handleSelectKeyframe}
-              copiedKeyframes={copiedKeyframes}
-            />
+          <PanelErrorBoundary name="Preview">
+            <Preview />
           </PanelErrorBoundary>
-        )}
-      </div>
 
-      {/* Resizable Handle */}
-      <div
-        className="h-1 bg-border hover:bg-primary/50 cursor-row-resize transition-colors z-10 relative group"
-        onMouseDown={handleMouseDown}
-      >
-        <div className="absolute inset-x-0 -top-1 -bottom-1 bg-transparent" />
-      </div>
+          {inspectorVisible && (
+            <>
+              <ResizableHandle
+                ariaLabel="Resize inspector panel"
+                axis="horizontal"
+                onResize={(delta) =>
+                  setPanelWidth("inspector", inspectorWidth - delta)
+                }
+              />
+              <div
+                className="shrink-0 min-w-0"
+                style={{ width: inspectorWidth }}
+              >
+                <PanelErrorBoundary name="Inspector">
+                  <InspectorPanel />
+                </PanelErrorBoundary>
+              </div>
+            </>
+          )}
+
+          {!inspectorVisible && (
+            <button
+              className="absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-2.5 py-1.5 text-[11px] font-medium text-text-secondary shadow-lg transition-colors hover:bg-background-elevated hover:text-text-primary"
+              onClick={() => setPanelVisible("inspector", true)}
+              type="button"
+            >
+              Inspector
+              <PanelRightOpen size={14} />
+            </button>
+          )}
+
+          {keyframeEditorOpen && (
+            <PanelErrorBoundary name="Keyframe Editor">
+              <KeyframeEditorPanel
+                clip={selectedClip}
+                onClose={() => setKeyframeEditorOpen(false)}
+                onUpdateKeyframe={handleUpdateKeyframe}
+                onDeleteKeyframe={handleDeleteKeyframe}
+                onCopyKeyframes={handleCopyKeyframes}
+                onPasteKeyframes={handlePasteKeyframes}
+                selectedKeyframeIds={selectedKeyframeIds}
+                onSelectKeyframe={handleSelectKeyframe}
+                copiedKeyframes={copiedKeyframes}
+              />
+            </PanelErrorBoundary>
+          )}
+        </div>
+      )}
+
+      {!timelineMaximized && (
+        <ResizableHandle
+          ariaLabel="Resize timeline"
+          axis="vertical"
+          onResize={(delta) => setPanelHeight("timeline", timelineHeight - delta)}
+        />
+      )}
 
       {/* Audio Mixer (when open) */}
       {panels.audioMixer?.visible && (
@@ -354,8 +399,8 @@ export const EditorInterface: React.FC = () => {
 
       {/* BOTTOM PANEL: Timeline */}
       <div
-        style={{ height: timelineHeight }}
-        className="shrink-0 flex flex-col"
+        style={timelineMaximized ? undefined : { height: timelineHeight }}
+        className={`${timelineMaximized ? "flex-1" : "shrink-0"} flex flex-col`}
       >
         <PanelErrorBoundary name="Timeline">
           <Timeline />
