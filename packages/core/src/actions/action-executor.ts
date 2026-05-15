@@ -461,6 +461,7 @@ export class ActionExecutor {
           parentClipId?: string;
           linkedClipId?: string;
           linkRole?: "video-parent" | "audio-child";
+          linked?: boolean;
         };
         const track = timeline.tracks.find(
           (t: MutableTrack) => t.id === params.trackId,
@@ -483,6 +484,7 @@ export class ActionExecutor {
             parentClipId: params.parentClipId,
             linkedClipId: params.linkedClipId,
             linkRole: params.linkRole,
+            linked: params.linked ?? (params.linkRole ? true : undefined),
             startTime: params.startTime,
             duration: clipDuration,
             inPoint: 0,
@@ -586,7 +588,13 @@ export class ActionExecutor {
       }
 
       case "clip/split": {
-        const params = action.params as { clipId: string; time: number };
+        const params = action.params as {
+          clipId: string;
+          time: number;
+          newClipParentClipId?: string;
+          newClipLinkedClipId?: string;
+          newClipLinkRole?: "video-parent" | "audio-child";
+        };
         const clip = this.findClip(timeline, params.clipId);
         if (clip) {
           const splitTime = params.time;
@@ -601,6 +609,9 @@ export class ActionExecutor {
           const clip2 = {
             ...clip,
             id: `clip-${(action as Action).id}`,
+            parentClipId: params.newClipParentClipId ?? clip.parentClipId,
+            linkedClipId: params.newClipLinkedClipId ?? clip.linkedClipId,
+            linkRole: params.newClipLinkRole ?? clip.linkRole,
             startTime: splitTime,
             duration: clip.duration - splitOffset,
             inPoint: clip.inPoint + splitOffset,

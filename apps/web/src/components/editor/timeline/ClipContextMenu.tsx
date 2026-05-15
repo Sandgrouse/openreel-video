@@ -9,6 +9,8 @@ import {
   Volume2,
   Film,
   Image,
+  Link,
+  Unlink,
 } from "lucide-react";
 import type { Clip, Track } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
@@ -42,6 +44,8 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     rippleDeleteClip,
     splitClip,
     separateAudio,
+    unlinkClipAudio,
+    relinkClipAudio,
     getMediaItem,
     copyEffects,
     pasteEffects,
@@ -65,6 +69,11 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
 
   const hasEffects = clip.effects && clip.effects.length > 0;
   const hasCopiedEffects = copiedEffects && copiedEffects.length > 0;
+  const isLinkedAudio =
+    clip.linked !== false &&
+    (clip.linkRole === "audio-child" || Boolean(clip.parentClipId));
+  const canRelink =
+    !isLinkedAudio && (isVideoWithAudio || (isAudio && mediaItem?.type === "video"));
 
   const handleCopy = () => {
     copyClips([clip.id]);
@@ -95,6 +104,16 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
 
   const handleSeparateAudio = async () => {
     await separateAudio(clip.id);
+    onClose?.();
+  };
+
+  const handleUnlinkAudio = () => {
+    unlinkClipAudio(clip.id);
+    onClose?.();
+  };
+
+  const handleRelinkAudio = () => {
+    relinkClipAudio(clip.id);
     onClose?.();
   };
 
@@ -172,16 +191,44 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
       {isVideoWithAudio && (
         <>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={handleSeparateAudio}>
-            <Music className="mr-2 h-4 w-4" />
-            Separate Audio
-          </ContextMenuItem>
+          {isLinkedAudio ? (
+            <ContextMenuItem onClick={handleUnlinkAudio}>
+              <Unlink className="mr-2 h-4 w-4" />
+              Unlink Audio
+            </ContextMenuItem>
+          ) : (
+            <>
+              <ContextMenuItem onClick={handleSeparateAudio}>
+                <Music className="mr-2 h-4 w-4" />
+                Show Linked Audio
+              </ContextMenuItem>
+              {canRelink && (
+                <ContextMenuItem onClick={handleRelinkAudio}>
+                  <Link className="mr-2 h-4 w-4" />
+                  Relink Audio
+                </ContextMenuItem>
+              )}
+            </>
+          )}
         </>
       )}
 
       {isAudio && (
         <>
           <ContextMenuSeparator />
+          {isLinkedAudio ? (
+            <ContextMenuItem onClick={handleUnlinkAudio}>
+              <Unlink className="mr-2 h-4 w-4" />
+              Unlink From Video
+            </ContextMenuItem>
+          ) : (
+            canRelink && (
+              <ContextMenuItem onClick={handleRelinkAudio}>
+                <Link className="mr-2 h-4 w-4" />
+                Relink To Video
+              </ContextMenuItem>
+            )
+          )}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
               <Volume2 className="mr-2 h-4 w-4" />

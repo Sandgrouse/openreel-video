@@ -105,6 +105,7 @@ export type ClipAction =
         parentClipId?: string;
         linkedClipId?: string;
         linkRole?: "video-parent" | "audio-child";
+        linked?: boolean;
       };
     }
   | { type: "clip/remove"; params: { clipId: string } }
@@ -116,7 +117,16 @@ export type ClipAction =
       type: "clip/trim";
       params: { clipId: string; inPoint?: number; outPoint?: number };
     }
-  | { type: "clip/split"; params: { clipId: string; time: number } }
+  | {
+      type: "clip/split";
+      params: {
+        clipId: string;
+        time: number;
+        newClipParentClipId?: string;
+        newClipLinkedClipId?: string;
+        newClipLinkRole?: "video-parent" | "audio-child";
+      };
+    }
   | { type: "clip/rippleDelete"; params: { clipId: string } };
 
 // Effect actions

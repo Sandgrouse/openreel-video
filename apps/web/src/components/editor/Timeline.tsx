@@ -652,6 +652,17 @@ export const Timeline: React.FC = () => {
     (clipId: string, edge: "left" | "right", newTime: number) => {
       const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
       if (!clip) return;
+      const linkedCounterpart =
+        clip.linkRole === "audio-child" && clip.parentClipId
+          ? tracks.flatMap((t) => t.clips).find((c) => c.id === clip.parentClipId)
+          : tracks
+              .flatMap((t) => t.clips)
+              .find(
+                (c) =>
+                  c.parentClipId === clip.id &&
+                  c.linkRole === "audio-child" &&
+                  c.linked !== false,
+              );
 
       const oldDuration = clip.duration;
       const newDuration =
@@ -687,6 +698,8 @@ export const Timeline: React.FC = () => {
               clips: track.clips.map((c) =>
                 c.id === clipId
                   ? { ...c, ...updates, keyframes: adjustedKeyframes }
+                  : linkedCounterpart && c.id === linkedCounterpart.id
+                    ? { ...c, ...updates }
                   : c,
               ),
             })),

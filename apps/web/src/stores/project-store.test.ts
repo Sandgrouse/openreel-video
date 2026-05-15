@@ -356,7 +356,7 @@ describe("ProjectStore", () => {
   });
 
   describe("linked video audio", () => {
-    it("should add a linked audio child clip when adding video media with audio", async () => {
+    const loadVideoWithAudio = () => {
       const currentProject = useProjectStore.getState().project;
       const videoMedia: MediaItem = {
         id: "video-with-audio",
@@ -383,6 +383,12 @@ describe("ProjectStore", () => {
         mediaLibrary: { items: [videoMedia] },
       });
 
+      return videoMedia;
+    };
+
+    it("should add a linked audio child clip when adding video media with audio", async () => {
+      const videoMedia = loadVideoWithAudio();
+
       const result = await useProjectStore
         .getState()
         .addClipToNewTrack(videoMedia.id, 3);
@@ -403,6 +409,119 @@ describe("ProjectStore", () => {
       expect(audioClip?.parentClipId).toBe(videoClip?.id);
       expect(audioClip?.linkedClipId).toBe(videoClip?.id);
       expect(audioClip?.linkRole).toBe("audio-child");
+      expect(audioClip?.linked).toBe(true);
+    });
+
+    it("should split linked video and audio clips as a pair", async () => {
+      const videoMedia = loadVideoWithAudio();
+
+      await useProjectStore.getState().addClipToNewTrack(videoMedia.id, 0);
+      const beforeSplit = useProjectStore.getState().project;
+      const videoClip = beforeSplit.timeline.tracks.find(
+        (track) => track.type === "video",
+      )?.clips[0];
+
+      expect(videoClip).toBeDefined();
+
+      const result = await useProjectStore
+        .getState()
+        .splitClip(videoClip!.id, 6);
+
+      expect(result.success).toBe(true);
+
+      const project = useProjectStore.getState().project;
+      const videoClips =
+        project.timeline.tracks.find((track) => track.type === "video")?.clips ??
+        [];
+      const audioClips =
+        project.timeline.tracks.find((track) => track.type === "audio")?.clips ??
+        [];
+      const rightVideo = videoClips.find((clip) => clip.startTime === 6);
+      const rightAudio = audioClips.find((clip) => clip.startTime === 6);
+
+      expect(videoClips).toHaveLength(2);
+      expect(audioClips).toHaveLength(2);
+      expect(rightVideo).toBeDefined();
+      expect(rightAudio).toBeDefined();
+      expect(rightAudio?.parentClipId).toBe(rightVideo?.id);
+      expect(rightAudio?.linkedClipId).toBe(rightVideo?.id);
+
+      await useProjectStore.getState().undo();
+      const restoredProject = useProjectStore.getState().project;
+      expect(
+        restoredProject.timeline.tracks.find((track) => track.type === "video")
+          ?.clips,
+      ).toHaveLength(1);
+      expect(
+        restoredProject.timeline.tracks.find((track) => track.type === "audio")
+          ?.clips,
+      ).toHaveLength(1);
+    });
+
+    it("should delete linked video and audio clips as a pair", async () => {
+      const videoMedia = loadVideoWithAudio();
+      await useProjectStore.getState().addClipToNewTrack(videoMedia.id, 0);
+
+      const project = useProjectStore.getState().project;
+      const videoClip = project.timeline.tracks.find(
+        (track) => track.type === "video",
+      )?.clips[0];
+
+      expect(videoClip).toBeDefined();
+
+      const result = await useProjectStore.getState().removeClip(videoClip!.id);
+      expect(result.success).toBe(true);
+
+      const updatedProject = useProjectStore.getState().project;
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "video")
+          ?.clips,
+      ).toHaveLength(0);
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "audio")
+          ?.clips,
+      ).toHaveLength(0);
+    });
+
+    it("should move linked video and audio clips together until unlinked", async () => {
+      const videoMedia = loadVideoWithAudio();
+      await useProjectStore.getState().addClipToNewTrack(videoMedia.id, 0);
+
+      const project = useProjectStore.getState().project;
+      const videoClip = project.timeline.tracks.find(
+        (track) => track.type === "video",
+      )?.clips[0];
+      const audioClip = project.timeline.tracks.find(
+        (track) => track.type === "audio",
+      )?.clips[0];
+
+      expect(videoClip).toBeDefined();
+      expect(audioClip).toBeDefined();
+
+      await useProjectStore.getState().moveClip(videoClip!.id, 4);
+
+      let updatedProject = useProjectStore.getState().project;
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "video")
+          ?.clips[0]?.startTime,
+      ).toBe(4);
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "audio")
+          ?.clips[0]?.startTime,
+      ).toBe(4);
+
+      useProjectStore.getState().unlinkClipAudio(videoClip!.id);
+      await useProjectStore.getState().moveClip(videoClip!.id, 6);
+
+      updatedProject = useProjectStore.getState().project;
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "video")
+          ?.clips[0]?.startTime,
+      ).toBe(6);
+      expect(
+        updatedProject.timeline.tracks.find((track) => track.type === "audio")
+          ?.clips[0]?.startTime,
+      ).toBe(4);
     });
   });
 

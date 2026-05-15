@@ -66,6 +66,79 @@ const mediaHasEmbeddedAudio = (mediaItem: MediaItem | undefined): boolean =>
       ((mediaItem.metadata?.channels ?? 0) > 0 || mediaItem.waveformData),
   );
 
+const findClipWithTrack = (project: Project, clipId: string) => {
+  for (const track of project.timeline.tracks) {
+    const clip = track.clips.find((candidate) => candidate.id === clipId);
+    if (clip) {
+      return { clip, track };
+    }
+  }
+  return null;
+};
+
+const findLinkedAudioChild = (project: Project, parentClip: Clip) =>
+  project.timeline.tracks
+    .filter((track) => track.type === "audio")
+    .flatMap((track) => track.clips)
+    .find((clip) => {
+      if (clip.linked === false || clip.linkRole !== "audio-child") {
+        return false;
+      }
+
+      if (
+        clip.parentClipId === parentClip.id ||
+        clip.linkedClipId === parentClip.id
+      ) {
+        return true;
+      }
+
+      return (
+        clip.mediaId === parentClip.mediaId &&
+        Math.abs(clip.startTime - parentClip.startTime) < 0.01 &&
+        Math.abs(clip.duration - parentClip.duration) < 0.01
+      );
+    });
+
+const findLinkedCounterpart = (project: Project, clip: Clip) => {
+  if (clip.linked === false) return null;
+
+  if (clip.linkRole === "audio-child") {
+    if (clip.parentClipId) {
+      const parent = findClipWithTrack(project, clip.parentClipId);
+      if (parent) return parent;
+    }
+    if (clip.linkedClipId) {
+      const linked = findClipWithTrack(project, clip.linkedClipId);
+      if (linked) return linked;
+    }
+    return (
+      project.timeline.tracks
+        .filter((track) => track.type === "video")
+        .flatMap((track) => track.clips.map((candidate) => ({ clip: candidate, track })))
+        .find(
+          ({ clip: candidate }) =>
+            candidate.linked !== false &&
+            candidate.mediaId === clip.mediaId &&
+            Math.abs(candidate.startTime - clip.startTime) < 0.01 &&
+            Math.abs(candidate.duration - clip.duration) < 0.01,
+        ) ?? null
+    );
+  }
+
+  const child = findLinkedAudioChild(project, clip);
+  return child ? findClipWithTrack(project, child.id) : null;
+};
+
+const getLinkedClipPairIds = (project: Project, clipId: string): string[] => {
+  const selected = findClipWithTrack(project, clipId);
+  if (!selected) return [clipId];
+
+  const counterpart = findLinkedCounterpart(project, selected.clip);
+  return counterpart
+    ? Array.from(new Set([selected.clip.id, counterpart.clip.id]))
+    : [selected.clip.id];
+};
+
 /**
  * ProjectState - Complete state interface for project management
  *
@@ -147,6 +220,8 @@ export interface ProjectState {
     startTime?: number,
   ) => Promise<ActionResult>;
   removeClip: (clipId: string) => Promise<ActionResult>;
+  unlinkClipAudio: (clipId: string) => void;
+  relinkClipAudio: (clipId: string) => void;
   moveClip: (
     clipId: string,
     startTime: number,
@@ -429,6 +504,40 @@ export const useProjectStore = create<ProjectState>()(
   subscribeWithSelector((set, get) => {
     const actionHistory = createProjectActionHistory();
     const actionExecutor = new ActionExecutor(actionHistory);
+    const attachGeneratedWaveform = async (
+      mediaId: string,
+      fileOrBlob: File | Blob,
+    ) => {
+      try {
+        const mediaBridge = getMediaBridge();
+        if (!mediaBridge.isInitialized()) {
+          await initializeMediaBridge();
+        }
+        const waveform = await mediaBridge.generateWaveform(
+          fileOrBlob,
+          mediaId,
+          100,
+        );
+        if (!waveform?.peaks) return;
+
+        set((state) => ({
+          project: {
+            ...state.project,
+            mediaLibrary: {
+              ...state.project.mediaLibrary,
+              items: state.project.mediaLibrary.items.map((item) =>
+                item.id === mediaId
+                  ? { ...item, waveformData: waveform.peaks }
+                  : item,
+              ),
+            },
+            modifiedAt: Date.now(),
+          },
+        }));
+      } catch (error) {
+        console.warn("[ProjectStore] Failed to generate waveform:", error);
+      }
+    };
 
     return {
       // Initial state - create empty project (Requirement 1.1)
@@ -496,6 +605,12 @@ export const useProjectStore = create<ProjectState>()(
           clipRedoStack: [],
           error: null,
         });
+
+        for (const item of fixedProject.mediaLibrary.items) {
+          if (mediaHasEmbeddedAudio(item) && !item.waveformData && item.blob) {
+            void attachGeneratedWaveform(item.id, item.blob);
+          }
+        }
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
         const placeholders = fixedProject.mediaLibrary.items.filter(
@@ -706,6 +821,10 @@ export const useProjectStore = create<ProjectState>()(
 
           set({ project: updatedProject });
 
+          if (mediaHasEmbeddedAudio(newMediaItem) && !newMediaItem.waveformData) {
+            void attachGeneratedWaveform(newMediaItem.id, file);
+          }
+
           try {
             await saveMediaBlob(
               updatedProject.id,
@@ -895,6 +1014,10 @@ export const useProjectStore = create<ProjectState>()(
               modifiedAt: Date.now(),
             },
           });
+
+          if (mediaHasEmbeddedAudio(updatedItem) && !updatedItem.waveformData) {
+            void attachGeneratedWaveform(updatedItem.id, file);
+          }
 
           return {
             success: true,
@@ -1384,6 +1507,7 @@ export const useProjectStore = create<ProjectState>()(
             parentClipId: videoClip.id,
             linkedClipId: videoClip.id,
             linkRole: "audio-child",
+            linked: true,
           },
         };
 
@@ -1395,37 +1519,186 @@ export const useProjectStore = create<ProjectState>()(
             modifiedAt: Date.now(),
           };
           set({ project: finalProject });
+
+          if (!mediaItem?.waveformData && mediaItem?.blob) {
+            void attachGeneratedWaveform(mediaItem.id, mediaItem.blob);
+          }
         }
 
         return result;
       },
 
       removeClip: async (clipId: string) => {
-        const { project, actionExecutor } = get();
-        const action: Action = {
-          type: "clip/remove",
-          id: uuidv4(),
-          timestamp: Date.now(),
-          params: { clipId },
-        };
-        const result = await actionExecutor.execute(action, project);
+        const { project, actionExecutor, actionHistory } = get();
+        const clipIds = getLinkedClipPairIds(project, clipId);
+        const projectCopy = structuredClone(project);
+
+        actionHistory.beginGroup("Delete linked clip");
+        let result: ActionResult = { success: true };
+        for (const id of clipIds) {
+          const action: Action = {
+            type: "clip/remove",
+            id: uuidv4(),
+            timestamp: Date.now(),
+            params: { clipId: id },
+          };
+          result = await actionExecutor.execute(action, projectCopy);
+          if (!result.success) break;
+        }
+        actionHistory.endGroup();
+
         if (result.success) {
-          set({ project: { ...project } });
+          set({ project: { ...projectCopy, modifiedAt: Date.now() } });
         }
         return result;
       },
 
+      unlinkClipAudio: (clipId: string) => {
+        const { project } = get();
+        const selected = findClipWithTrack(project, clipId);
+        if (!selected) return;
+        const counterpart = findLinkedCounterpart(project, selected.clip);
+        const ids = new Set(
+          [selected.clip.id, counterpart?.clip.id].filter(
+            (id): id is string => Boolean(id),
+          ),
+        );
+
+        set({
+          project: {
+            ...project,
+            timeline: {
+              ...project.timeline,
+              tracks: project.timeline.tracks.map((track) => ({
+                ...track,
+                clips: track.clips.map((clip) =>
+                  ids.has(clip.id)
+                    ? {
+                        ...clip,
+                        linked: false,
+                        parentClipId: undefined,
+                        linkedClipId: undefined,
+                        linkRole: undefined,
+                      }
+                    : clip,
+                ),
+              })),
+            },
+            modifiedAt: Date.now(),
+          },
+        });
+      },
+
+      relinkClipAudio: (clipId: string) => {
+        const { project } = get();
+        const selected = findClipWithTrack(project, clipId);
+        if (!selected) return;
+
+        const video =
+          selected.track.type === "video"
+            ? selected
+            : project.timeline.tracks
+                .filter((track) => track.type === "video")
+                .flatMap((track) =>
+                  track.clips.map((clip) => ({ clip, track })),
+                )
+                .find(
+                  ({ clip }) =>
+                    clip.mediaId === selected.clip.mediaId &&
+                    Math.abs(clip.startTime - selected.clip.startTime) < 0.01,
+                );
+        const audio =
+          selected.track.type === "audio"
+            ? selected
+            : project.timeline.tracks
+                .filter((track) => track.type === "audio")
+                .flatMap((track) =>
+                  track.clips.map((clip) => ({ clip, track })),
+                )
+                .find(
+                  ({ clip }) =>
+                    clip.mediaId === selected.clip.mediaId &&
+                    Math.abs(clip.startTime - selected.clip.startTime) < 0.01,
+                );
+
+        if (!video || !audio) return;
+
+        set({
+          project: {
+            ...project,
+            timeline: {
+              ...project.timeline,
+              tracks: project.timeline.tracks.map((track) => ({
+                ...track,
+                clips: track.clips.map((clip) => {
+                  if (clip.id === audio.clip.id) {
+                    return {
+                      ...clip,
+                      linked: true,
+                      parentClipId: video.clip.id,
+                      linkedClipId: video.clip.id,
+                      linkRole: "audio-child",
+                    };
+                  }
+                  if (clip.id === video.clip.id) {
+                    return { ...clip, linked: true };
+                  }
+                  return clip;
+                }),
+              })),
+            },
+            modifiedAt: Date.now(),
+          },
+        });
+      },
+
       moveClip: async (clipId: string, startTime: number, trackId?: string) => {
-        const { project, actionExecutor } = get();
-        const action: Action = {
-          type: "clip/move",
-          id: uuidv4(),
-          timestamp: Date.now(),
-          params: { clipId, startTime, trackId },
-        };
-        const result = await actionExecutor.execute(action, project);
+        const { project, actionExecutor, actionHistory } = get();
+        const selected = findClipWithTrack(project, clipId);
+        if (!selected) {
+          return {
+            success: false,
+            error: {
+              code: "CLIP_NOT_FOUND" as const,
+              message: "Clip not found",
+            },
+          };
+        }
+
+        const delta = startTime - selected.clip.startTime;
+        const counterpart = findLinkedCounterpart(project, selected.clip);
+        const projectCopy = structuredClone(project);
+        const actions: Action[] = [
+          {
+            type: "clip/move",
+            id: uuidv4(),
+            timestamp: Date.now(),
+            params: { clipId, startTime, trackId },
+          },
+        ];
+
+        if (counterpart && Math.abs(delta) > 0.0001) {
+          actions.push({
+            type: "clip/move",
+            id: uuidv4(),
+            timestamp: Date.now(),
+            params: {
+              clipId: counterpart.clip.id,
+              startTime: Math.max(0, counterpart.clip.startTime + delta),
+            },
+          });
+        }
+
+        actionHistory.beginGroup("Move linked clip");
+        let result: ActionResult = { success: true };
+        for (const action of actions) {
+          result = await actionExecutor.execute(action, projectCopy);
+          if (!result.success) break;
+        }
+        actionHistory.endGroup();
+
         if (result.success) {
-          set({ project: { ...project } });
+          set({ project: { ...projectCopy, modifiedAt: Date.now() } });
         }
         return result;
       },
@@ -1446,18 +1719,62 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       splitClip: async (clipId: string, time: number) => {
-        const { project, actionExecutor } = get();
-        const action: Action = {
+        const { project, actionExecutor, actionHistory } = get();
+        const selected = findClipWithTrack(project, clipId);
+        const linkedAudioClip =
+          selected?.track.type === "video"
+            ? findLinkedAudioChild(project, selected.clip)
+            : undefined;
+
+        const projectCopy = structuredClone(project);
+        const primaryAction: Action = {
           type: "clip/split",
           id: uuidv4(),
           timestamp: Date.now(),
           params: { clipId, time },
         };
-        const result = await actionExecutor.execute(action, project);
-        if (result.success) {
-          set({ project: { ...project } });
+
+        if (!linkedAudioClip) {
+          const result = await actionExecutor.execute(primaryAction, projectCopy);
+          if (result.success) {
+            set({ project: { ...projectCopy, modifiedAt: Date.now() } });
+          }
+          return result;
         }
-        return result;
+
+        const linkedClipEnd = linkedAudioClip.startTime + linkedAudioClip.duration;
+        const shouldSplitLinkedAudio =
+          time > linkedAudioClip.startTime && time < linkedClipEnd;
+        const linkedActionId = uuidv4();
+        const rightVideoClipId = `clip-${primaryAction.id}`;
+        const linkedAction: Action | null = shouldSplitLinkedAudio
+          ? {
+              type: "clip/split",
+              id: linkedActionId,
+              timestamp: Date.now(),
+              params: {
+                clipId: linkedAudioClip.id,
+                time,
+                newClipParentClipId: rightVideoClipId,
+                newClipLinkedClipId: rightVideoClipId,
+                newClipLinkRole: "audio-child",
+              },
+            }
+          : null;
+
+        actionHistory.beginGroup("Split linked video and audio");
+        const result = await actionExecutor.execute(primaryAction, projectCopy);
+        let linkedResult: ActionResult | null = null;
+
+        if (result.success) {
+          if (linkedAction) {
+            linkedResult = await actionExecutor.execute(linkedAction, projectCopy);
+          }
+          set({ project: { ...projectCopy, modifiedAt: Date.now() } });
+        }
+        actionHistory.endGroup();
+
+        return linkedResult && !linkedResult.success ? linkedResult : result;
       },
 
       rippleDeleteClip: async (clipId: string) => {

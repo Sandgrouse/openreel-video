@@ -43,6 +43,7 @@ import {
   type StickerClip,
   type Subtitle,
   type Track,
+  type Clip,
 } from "@openreel/core";
 import { useEngineStore } from "../../stores/engine-store";
 import {
@@ -222,7 +223,7 @@ export const Preview: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isRenderBridgeReady, setIsRenderBridgeReady] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
-  const [rendererType, setRendererType] = useState<string>("none");
+  const [, setRendererType] = useState<string>("none");
   const [isMaximized, setIsMaximized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -362,6 +363,25 @@ export const Preview: React.FC = () => {
   const timelineTracksRef = useRef(timelineTracks);
   useEffect(() => {
     timelineTracksRef.current = timelineTracks;
+  }, [timelineTracks]);
+
+  useEffect(() => {
+    const audioGraph = audioGraphRef.current;
+    if (!audioGraph) return;
+
+    for (const track of timelineTracks) {
+      if (track.type !== "audio" && track.type !== "video") continue;
+      audioGraph.createTrack({
+        trackId: track.id,
+        volume: 1,
+        pan: 0,
+        muted: track.muted || false,
+        solo: track.solo || false,
+        effects: [],
+      });
+      audioGraph.setTrackMuted(track.id, track.muted || false);
+      audioGraph.setTrackSolo(track.id, track.solo || false);
+    }
   }, [timelineTracks]);
 
   // Keep a ref to allTextClips for use in playback effect
@@ -812,6 +832,46 @@ export const Preview: React.FC = () => {
     [],
   );
 
+  const hasLinkedAudioChild = useCallback((clipId: string, tracks: Track[]) => {
+    return tracks.some(
+      (track) =>
+        track.type === "audio" &&
+        track.clips.some(
+          (clip) =>
+            clip.linked !== false &&
+            clip.parentClipId === clipId && clip.linkRole === "audio-child",
+        ),
+    );
+  }, []);
+
+  const clipHasPlayableAudio = useCallback(
+    (track: Track, clip: Clip, tracks: Track[]) => {
+      if (track.type === "audio") {
+        if (clip.linkRole === "audio-child" && clip.parentClipId) {
+          const parentTrack = tracks.find((candidate) =>
+            candidate.clips.some(
+              (candidateClip) => candidateClip.id === clip.parentClipId,
+            ),
+          );
+          if (parentTrack?.muted || parentTrack?.hidden) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      if (track.type !== "video" || hasLinkedAudioChild(clip.id, tracks)) {
+        return false;
+      }
+
+      const mediaItem = getMediaItem(clip.mediaId);
+      return Boolean(
+        mediaItem?.type === "video" && (mediaItem.metadata?.channels ?? 0) > 0,
+      );
+    },
+    [getMediaItem, hasLinkedAudioChild],
+  );
+
   /**
    * Set up audio playback from the AUDIO TRACK at a given timeline position
    * Uses RealtimeAudioGraph for real-time audio effects (reverb, delay, EQ, compressor)
@@ -992,6 +1052,10 @@ export const Preview: React.FC = () => {
 
       for (const track of tracksWithAudio) {
         for (const clip of track.clips) {
+          if (!clipHasPlayableAudio(track, clip, tracks)) {
+            continue;
+          }
+
           const clipEnd = clip.startTime + clip.duration;
           if (clipEnd <= time || clip.startTime > time + 1) {
             continue;
@@ -1024,7 +1088,7 @@ export const Preview: React.FC = () => {
 
       return schedules;
     },
-    [],
+    [clipHasPlayableAudio],
   );
 
   /**
@@ -1942,18 +2006,14 @@ export const Preview: React.FC = () => {
       await masterClock.play();
       audioGraph.startScheduler(() => {
         const tracksWithAudio = timelineTracks.filter(
-          (t) => (t.type === "audio" || t.type === "video") && !t.hidden,
+          (t) => (t.type === "audio" || t.type === "video") && !t.hidden && !t.muted,
         );
         const schedules: AudioClipSchedule[] = [];
         for (const track of tracksWithAudio) {
           for (const audioClip of track.clips) {
-            const mediaItem = getMediaItem(audioClip.mediaId);
-            const hasAudio =
-              mediaItem?.type === "audio" ||
-              (mediaItem?.type === "video" &&
-                mediaItem?.metadata?.channels &&
-                mediaItem.metadata.channels > 0);
-            if (!hasAudio) continue;
+            if (!clipHasPlayableAudio(track, audioClip, timelineTracks)) {
+              continue;
+            }
 
             const audioBuffer = audioBufferCacheRef.current.get(audioClip.mediaId);
             if (audioBuffer) {
@@ -2277,6 +2337,7 @@ export const Preview: React.FC = () => {
     [
       actualEndTime,
       allSubtitles,
+      clipHasPlayableAudio,
       getMediaItem,
       isMuted,
       preDecodeAllAudioBuffers,
@@ -4631,7 +4692,6 @@ export const Preview: React.FC = () => {
 
       if (e.code === "Space") {
         spaceHeldRef.current = true;
-        e.preventDefault();
       }
 
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -5461,18 +5521,6 @@ export const Preview: React.FC = () => {
             {formatTime(playheadPosition)}
           </div>
 
-          {rendererType !== "none" && (
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded ${
-                rendererType === "webgpu"
-                  ? "bg-green-500/20 text-green-400"
-                  : "bg-gray-500/20 text-gray-400"
-              }`}
-              title={`Rendering with ${rendererType.toUpperCase()}`}
-            >
-              {rendererType.toUpperCase()}
-            </span>
-          )}
           <ToolsRail activeTool={activeTool} onToolChange={setActiveTool} />
         </div>
 

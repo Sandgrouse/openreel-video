@@ -275,11 +275,32 @@ export class AudioEngine {
   ): AudioTrackRenderInfo[] {
     const result: AudioTrackRenderInfo[] = [];
     const endTime = startTime + duration;
+    const hasLinkedAudioChild = (clipId: string) =>
+      timeline.tracks.some(
+        (track) =>
+          track.type === "audio" &&
+          track.clips.some(
+            (clip) =>
+              clip.linked !== false &&
+              clip.parentClipId === clipId && clip.linkRole === "audio-child",
+          ),
+      );
+    const isLinkedAudioParentMuted = (clip: Clip) => {
+      if (clip.linkRole !== "audio-child" || !clip.parentClipId) return false;
+      const parentTrack = timeline.tracks.find((track) =>
+        track.clips.some((candidate) => candidate.id === clip.parentClipId),
+      );
+      return Boolean(parentTrack?.muted || parentTrack?.hidden);
+    };
 
     timeline.tracks.forEach((track, index) => {
       if (track.type !== "audio" && track.type !== "video") return;
 
-      const clips = this.getClipsInRange(track, startTime, endTime);
+      const clips = this.getClipsInRange(track, startTime, endTime).filter(
+        (clip) =>
+          (track.type !== "video" || !hasLinkedAudioChild(clip.id)) &&
+          (track.type !== "audio" || !isLinkedAudioParentMuted(clip)),
+      );
       if (clips.length === 0) return;
 
       result.push({

@@ -552,11 +552,35 @@ export class PlaybackController {
 
     const schedules: AudioClipSchedule[] = [];
     const { timeline, mediaLibrary } = this.project;
+    const hasLinkedAudioChild = (clipId: string) =>
+      timeline.tracks.some(
+        (track) =>
+          track.type === "audio" &&
+          track.clips.some(
+            (clip) =>
+              clip.linked !== false &&
+              clip.parentClipId === clipId && clip.linkRole === "audio-child",
+          ),
+      );
+    const isLinkedAudioParentMuted = (clip: { parentClipId?: string }) => {
+      if (!clip.parentClipId) return false;
+      const parentTrack = timeline.tracks.find((track) =>
+        track.clips.some((candidate) => candidate.id === clip.parentClipId),
+      );
+      return Boolean(parentTrack?.muted || parentTrack?.hidden);
+    };
 
     for (const track of timeline.tracks) {
       if (track.type !== "audio" && track.type !== "video") continue;
 
       for (const clip of track.clips) {
+        if (track.type === "video" && hasLinkedAudioChild(clip.id)) {
+          continue;
+        }
+        if (track.type === "audio" && isLinkedAudioParentMuted(clip)) {
+          continue;
+        }
+
         const clipEnd = clip.startTime + clip.duration;
         if (clipEnd <= time || clip.startTime > time + 1) continue;
 

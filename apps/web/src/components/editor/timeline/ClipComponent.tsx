@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Image, Link2 } from "lucide-react";
+import WaveSurfer from "wavesurfer.js";
 import type { Clip, Track } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -80,6 +81,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     startY: 0,
   });
   const clipRef = useRef<HTMLDivElement>(null);
+  const waveformRef = useRef<HTMLDivElement>(null);
+  const waveSurferRef = useRef<WaveSurfer | null>(null);
 
   const left = clip.startTime * pixelsPerSecond;
   const width = clip.duration * pixelsPerSecond;
@@ -90,6 +93,36 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const isImage = track.type === "image";
   const isLinkedAudioChild = isAudio && clip.linkRole === "audio-child" && clip.parentClipId;
   const clipStyle = getClipStyle(track.type);
+
+  useEffect(() => {
+    if (!isAudio || !waveformRef.current || !mediaItem?.waveformData) {
+      waveSurferRef.current?.destroy();
+      waveSurferRef.current = null;
+      return;
+    }
+
+    waveSurferRef.current?.destroy();
+    waveSurferRef.current = WaveSurfer.create({
+      container: waveformRef.current,
+      peaks: [mediaItem.waveformData],
+      duration: mediaItem.metadata.duration || clip.duration,
+      height: "auto",
+      fillParent: true,
+      interact: false,
+      cursorWidth: 0,
+      normalize: true,
+      waveColor: "rgba(147, 197, 253, 0.78)",
+      progressColor: "rgba(147, 197, 253, 0.78)",
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 1,
+    });
+
+    return () => {
+      waveSurferRef.current?.destroy();
+      waveSurferRef.current = null;
+    };
+  }, [clip.duration, isAudio, mediaItem?.metadata.duration, mediaItem?.waveformData]);
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -448,7 +481,9 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       {(isAudio || isVideo) && (
         <>
           <div className={`absolute inset-x-0 px-1 pointer-events-none ${isAudio ? "inset-y-0 flex items-center opacity-50" : "bottom-0 h-1/3 flex items-end opacity-30"}`}>
-            {mediaItem?.waveformData ? (
+            {isAudio && mediaItem?.waveformData ? (
+              <div ref={waveformRef} className="h-full w-full" />
+            ) : mediaItem?.waveformData ? (
               <svg
                 className="w-full h-full"
                 preserveAspectRatio="none"
@@ -464,15 +499,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
                 />
               </svg>
             ) : isAudio ? (
-              <svg className="w-full h-full" preserveAspectRatio="none">
-                <path
-                  d="M0,20 Q10,5 20,20 T40,20 T60,20 T80,20 T100,20"
-                  stroke="currentColor"
-                  className="text-blue-400"
-                  fill="none"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
+              <div className="flex h-full w-full items-center gap-1 opacity-60">
+                {Array.from({ length: 32 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="w-0.5 rounded-full bg-blue-300/60"
+                    style={{ height: `${20 + ((index * 17) % 45)}%` }}
+                  />
+                ))}
+              </div>
             ) : null}
           </div>
           {isAudio && (
